@@ -1,0 +1,516 @@
+// zcc/src/languages.zz — language detection + comment rules.
+// Customizable: edit languages.json in repo root (devs) or
+// ~/.config/zcc/languages.json (users, overrides builtin).
+// Runtime lookup tries user config first, falls back to builtins below.
+import std.fs
+import std.str
+import std.json
+import std.env
+
+// ── Config paths (cross-platform) ────────────────────────────────────────────
+
+pub func config_dir() -> str {
+    match env.home_dir() {
+        .some(h) => {
+            os := env.os()
+            if os == "windows" {
+                match env.get("APPDATA") {
+                    .some(a) => a + "\\zcc",
+                    .none => h + "\\.config\\zcc",
+                }
+            } else {
+                h + "/.config/zcc"
+            }
+        },
+        .none => ".",
+    }
+}
+
+pub func user_languages_path() -> str {
+    dir := config_dir()
+    os := env.os()
+    if os == "windows" {
+        dir + "\\languages.json"
+    } else {
+        dir + "/languages.json"
+    }
+}
+
+// ── Builtin detection (fallback when JSON missing) ───────────────────────────
+
+pub func detect_lang(path: str) -> str {
+    base := fs.basename(path)
+    // Exact filenames first (no extension).
+    if base == "Makefile" {
+        return "Makefile"
+    }
+    if base == "makefile" {
+        return "Makefile"
+    }
+    if base == "GNUmakefile" {
+        return "Makefile"
+    }
+    if base == "Dockerfile" {
+        return "Dockerfile"
+    }
+    if base == "dockerfile" {
+        return "Dockerfile"
+    }
+    if base == "CMakeLists.txt" {
+        return "CMake"
+    }
+    if base == "Gemfile" {
+        return "Ruby"
+    }
+    if base == "Rakefile" {
+        return "Ruby"
+    }
+    if base == ".bashrc" {
+        return "Bash"
+    }
+    if base == ".zshrc" {
+        return "Zsh"
+    }
+    if base == ".vimrc" {
+        return "VimScript"
+    }
+    ext := str.to_lower(fs.extension(path))
+    if ext == "zz" {
+        return "ZZ"
+    }
+    if ext == "rs" {
+        return "Rust"
+    }
+    if ext == "py" || ext == "pyw" {
+        return "Python"
+    }
+    if ext == "js" || ext == "mjs" || ext == "cjs" {
+        return "JavaScript"
+    }
+    if ext == "ts" || ext == "mts" || ext == "cts" {
+        return "TypeScript"
+    }
+    if ext == "tsx" {
+        return "Tsx"
+    }
+    if ext == "jsx" {
+        return "Jsx"
+    }
+    if ext == "go" {
+        return "Go"
+    }
+    if ext == "c" {
+        return "C"
+    }
+    if ext == "h" {
+        return "CHeader"
+    }
+    if ext == "cpp" || ext == "cc" || ext == "cxx" || ext == "c++" || ext == "cp" {
+        return "Cpp"
+    }
+    if ext == "hpp" || ext == "hh" || ext == "hxx" {
+        return "CppHeader"
+    }
+    if ext == "cs" {
+        return "CSharp"
+    }
+    if ext == "java" {
+        return "Java"
+    }
+    if ext == "kt" || ext == "kts" {
+        return "Kotlin"
+    }
+    if ext == "swift" {
+        return "Swift"
+    }
+    if ext == "rb" {
+        return "Ruby"
+    }
+    if ext == "erb" {
+        return "RubyHtml"
+    }
+    if ext == "php" {
+        return "Php"
+    }
+    if ext == "pl" || ext == "pm" {
+        return "Perl"
+    }
+    if ext == "p6" || ext == "pm6" || ext == "raku" {
+        return "Perl6"
+    }
+    if ext == "sh" || ext == "bash" {
+        return "Bash"
+    }
+    if ext == "zsh" {
+        return "Zsh"
+    }
+    if ext == "fish" {
+        return "Fish"
+    }
+    if ext == "csh" {
+        return "CShell"
+    }
+    if ext == "nu" {
+        return "Nushell"
+    }
+    if ext == "ps1" || ext == "psm1" || ext == "psd1" {
+        return "PowerShell"
+    }
+    if ext == "lua" {
+        return "Lua"
+    }
+    if ext == "r" {
+        return "R"
+    }
+    if ext == "jl" {
+        return "Julia"
+    }
+    if ext == "dart" {
+        return "Dart"
+    }
+    if ext == "ex" || ext == "exs" {
+        return "Elixir"
+    }
+    if ext == "erl" || ext == "hrl" {
+        return "Erlang"
+    }
+    if ext == "ml" || ext == "mli" {
+        return "OCaml"
+    }
+    if ext == "scala" || ext == "sc" {
+        return "Scala"
+    }
+    if ext == "kt" {
+        return "Kotlin"
+    }
+    if ext == "fs" || ext == "fsi" || ext == "fsx" {
+        return "FSharp"
+    }
+    if ext == "d" {
+        return "D"
+    }
+    if ext == "d2" {
+        return "D2"
+    }
+    if ext == "nim" || ext == "nims" {
+        return "Nim"
+    }
+    if ext == "zig" {
+        return "Zig"
+    }
+    if ext == "html" || ext == "htm" {
+        return "Html"
+    }
+    if ext == "css" {
+        return "Css"
+    }
+    if ext == "xml" {
+        return "Xml"
+    }
+    if ext == "svg" {
+        return "Svg"
+    }
+    if ext == "vue" {
+        return "Vue"
+    }
+    if ext == "svelte" {
+        return "Svelte"
+    }
+    if ext == "sql" {
+        return "Sql"
+    }
+    if ext == "json" {
+        return "Json"
+    }
+    if ext == "toml" {
+        return "Toml"
+    }
+    if ext == "yaml" || ext == "yml" {
+        return "Yaml"
+    }
+    if ext == "md" || ext == "markdown" {
+        return "Markdown"
+    }
+    if ext == "txt" {
+        return "Text"
+    }
+    if ext == "qml" {
+        return "Qml"
+    }
+    if ext == "gd" {
+        return "GdScript"
+    }
+    if ext == "gdshader" {
+        return "GdShader"
+    }
+    if ext == "cu" || ext == "cuh" {
+        return "Cuda"
+    }
+    if ext == "pyx" || ext == "pxd" {
+        return "Cython"
+    }
+    if ext == "m" {
+        return "ObjectiveC"
+    }
+    if ext == "mm" {
+        return "ObjectiveCpp"
+    }
+    if ext == "pas" || ext == "pp" {
+        return "Pascal"
+    }
+    if ext == "asm" || ext == "s" {
+        return "Assembly"
+    }
+    if ext == "ahk" || ext == "ahkl" {
+        return "AutoHotKey"
+    }
+    if ext == "cmake" {
+        return "CMake"
+    }
+    if ext == "coffee" {
+        return "CoffeeScript"
+    }
+    if ext == "jq" {
+        return "Jq"
+    }
+    if ext == "ll" {
+        return "LLVM"
+    }
+    if ext == "mk" || ext == "mak" {
+        return "Makefile"
+    }
+    if ext == "wat" || ext == "wast" {
+        return "WebAssembly"
+    }
+    if ext == "vim" {
+        return "VimScript"
+    }
+    if ext == "vbs" {
+        return "VBScript"
+    }
+    if ext == "bas" || ext == "cls" || ext == "frm" {
+        return "VB6"
+    }
+    ""
+}
+
+// ── Comment rules per language ───────────────────────────────────────────────
+// Returns line markers joined by \x01, block pair as [start, end].
+
+pub func line_markers(lang: str) -> [str] {
+    if lang == "ZZ" {
+        return ["//", "#"]
+    }
+    if lang == "Rust" || lang == "Go" || lang == "C" || lang == "CHeader" || lang == "Cpp" || lang == "CppHeader" || lang == "CSharp" || lang == "Java" || lang == "Kotlin" || lang == "Swift" || lang == "Dart" || lang == "Scala" || lang == "Zig" {
+        return ["//"]
+    }
+    if lang == "JavaScript" || lang == "TypeScript" || lang == "Jsx" || lang == "Tsx" || lang == "Qml" || lang == "Cuda" || lang == "Cython" {
+        return ["//"]
+    }
+    if lang == "Python" || lang == "Bash" || lang == "Zsh" || lang == "Fish" || lang == "Nushell" || lang == "CShell" || lang == "Ruby" || lang == "Perl" || lang == "Perl6" || lang == "R" || lang == "Julia" || lang == "Nim" || lang == "Yaml" || lang == "Toml" || lang == "Makefile" || lang == "CMake" || lang == "Dockerfile" || lang == "Elixir" || lang == "Jq" || lang == "CoffeeScript" || lang == "D" || lang == "D2" {
+        return ["#"]
+    }
+    if lang == "Php" {
+        return ["//", "#"]
+    }
+    if lang == "Lua" || lang == "Sql" {
+        return ["--"]
+    }
+    if lang == "Assembly" {
+        return [";", "#", "//"]
+    }
+    if lang == "AutoHotKey" {
+        return [";"]
+    }
+    if lang == "Erlang" {
+        return ["%"]
+    }
+    if lang == "VimScript" {
+        return ["\""]
+    }
+    if lang == "VB6" || lang == "VBScript" {
+        return ["'"]
+    }
+    if lang == "LLVM" {
+        return [";"]
+    }
+    if lang == "FSharp" {
+        return ["//"]
+    }
+    if lang == "PowerShell" {
+        return ["#"]
+    }
+    if lang == "GdScript" {
+        return ["#"]
+    }
+    if lang == "GdShader" || lang == "ObjectiveC" || lang == "ObjectiveCpp" || lang == "Pascal" || lang == "OCaml" {
+        return ["//"]
+    }
+    if lang == "WebAssembly" {
+        return [";;"]
+    }
+    if lang == "D" {
+        return ["//"]
+    }
+    []
+}
+
+pub func block_pair(lang: str) -> [str] {
+    if lang == "Html" || lang == "Xml" || lang == "Svg" || lang == "Vue" || lang == "Svelte" {
+        return ["<!--", "-->"]
+    }
+    if lang == "Css" {
+        return ["/*", "*/"]
+    }
+    if lang == "OCaml" {
+        return ["(*", "*)"]
+    }
+    if lang == "FSharp" {
+        return ["(*", "*)"]
+    }
+    if lang == "Lua" {
+        return ["--[[", "]]"]
+    }
+    if lang == "Julia" {
+        return ["#=", "=#"]
+    }
+    if lang == "Nim" {
+        return ["#[", "]#"]
+    }
+    if lang == "Python" || lang == "Cython" || lang == "GdScript" {
+        return ["\"\"\"", "\"\"\""]
+    }
+    if lang == "Ruby" {
+        return ["=begin", "=end"]
+    }
+    if lang == "RubyHtml" {
+        return ["<%", "%>"]
+    }
+    if lang == "Pascal" {
+        return ["{", "}"]
+    }
+    if lang == "Perl" {
+        return ["=cut", "=cut"]
+    }
+    if lang == "Perl6" {
+        return ["#=", "=#"]
+    }
+    if lang == "PowerShell" {
+        return ["<#", "#>"]
+    }
+    if lang == "CMake" {
+        return ["#[[", "]]"]
+    }
+    if lang == "CoffeeScript" {
+        return ["###", "###"]
+    }
+    if lang == "WebAssembly" {
+        return ["(;", ";)"]
+    }
+    if lang == "Text" || lang == "Json" || lang == "Markdown" {
+        return []
+    }
+    if lang == "Bash" || lang == "Zsh" || lang == "Fish" || lang == "Nushell" || lang == "CShell" || lang == "Makefile" || lang == "Dockerfile" || lang == "Yaml" || lang == "Toml" || lang == "Elixir" || lang == "Erlang" || lang == "Jq" || lang == "R" || lang == "VimScript" || lang == "VB6" || lang == "VBScript" || lang == "LLVM" || lang == "Zig" {
+        return []
+    }
+    // C-family default.
+    ["/*", "*/"]
+}
+
+// ── JSON override (user customization) ───────────────────────────────────────
+// Best-effort: returns "" when no custom file || lookup fails.
+
+pub func noop() {
+}
+
+pub func json_lookup_lang(path: str) -> str {
+    upath := user_languages_path()
+    if !fs.exists(upath) {
+        if !fs.exists("languages.json") {
+            return ""
+        }
+        return json_file_lookup("languages.json", path)
+    }
+    json_file_lookup(upath, path)
+}
+
+pub func json_file_lookup(cfg: str, path: str) -> str {
+    match fs.read_to_string(cfg) {
+        .ok(text) => {
+            match json.parse(text) {
+                .ok(root) => {
+                    if json.type(root) != "object" {
+                        return ""
+                    }
+                    base := fs.basename(path)
+                    ext := str.to_lower(fs.extension(path))
+                    names := json.keys(root)
+                    for name in names {
+                        match json.get(root, name) {
+                            .ok(langobj) => {
+                                // files exact match
+                                if json.has(langobj, "files") {
+                                    match json.get(langobj, "files") {
+                                        .ok(arr) => {
+                                            n := json.len(arr)
+                                            for i in 0..n {
+                                                match json.get(arr, str(i)) {
+                                                    .ok(v) => {
+                                                        // as_str may fail for non-strings; guard via type
+                                                        if json.type(v) == "string" {
+                                                            f := json.as_str(v)
+                                                            if f == base {
+                                                                return name
+                                                            }
+                                                        }
+                                                        ""
+                                                    },
+                                                    .err(_) => "",
+                                                }
+                                            }
+                                        },
+                                        .err(_) => noop(),
+                                    }
+                                }
+                                if json.has(langobj, "extensions") {
+                                    match json.get(langobj, "extensions") {
+                                        .ok(arr) => {
+                                            n := json.len(arr)
+                                            for i in 0..n {
+                                                match json.get(arr, str(i)) {
+                                                    .ok(v) => {
+                                                        if json.type(v) == "string" {
+                                                            e := str.to_lower(json.as_str(v))
+                                                            if e == ext {
+                                                                return name
+                                                            }
+                                                        }
+                                                        ""
+                                                    },
+                                                    .err(_) => "",
+                                                }
+                                            }
+                                        },
+                                        .err(_) => noop(),
+                                    }
+                                }
+                            },
+                            .err(_) => noop(),
+                        }
+                    }
+                    ""
+                },
+                .err(_) => "",
+            }
+        },
+        .err(_) => "",
+    }
+}
+
+pub func resolve_lang(path: str) -> str {
+    custom := json_lookup_lang(path)
+    if custom != "" {
+        return custom
+    }
+    detect_lang(path)
+}

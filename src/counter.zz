@@ -1,0 +1,330 @@
+// zcc/src/counter.zz — single-pass line counter.
+// Handles: blanks, line comments, block comments (nest-aware for Rust-style),
+// triple-quote doc strings (Python), Markdown fenced embeds.
+import std.str
+import std.vec
+import languages
+
+pub struct Counts { files: int, lines: int, code: int, comments: int, blanks: int }
+
+pub func zero() -> Counts {
+    Counts{ files: 0, lines: 0, code: 0, comments: 0, blanks: 0 }
+}
+
+pub func split_lines(content: str) -> [str] {
+    if content == "" {
+        return []
+    }
+    lines := str.split(content, "\n")
+    // Drop artifact empty from trailing newline ("a\n" -> ["a", ""]).
+    if len(lines) > 0 && lines[len(lines) - 1] == "" {
+        lines = lines[:len(lines) - 1]
+    }
+    lines
+}
+
+pub func is_blank(s: str) -> bool {
+    str.trim(s) == ""
+}
+
+pub func starts_with_any(s: str, markers: [str]) -> bool {
+    for m in markers {
+        if m != "" && str.starts_with(s, m) {
+            return true
+        }
+    }
+    false
+}
+
+// Strip simple string literals so // inside "..." is not a comment.
+// Handles " ' ` with backslash escapes.
+pub func strip_strings(line: str) -> str {
+    // Guard: minified/long lines (e.g. 900K JSON) would be O(n^2) via concat.
+    // Callers fast-path Json/Text already; this caps worst case for other langs.
+    if len(line) > 20000 {
+        return line
+    }
+    out := ""
+    i := 0
+    n := len(line)
+    quote := ""
+    while i < n {
+        ch := line[i]
+        if quote == "" {
+            if ch == "\"" || ch == "'" || ch == "`" {
+                quote = ch
+                out = out + " "
+            } else {
+                out = out + ch
+            }
+        } else {
+            if ch == "\\" {
+                out = out + "  "
+                i = i + 1
+            } else {
+                if ch == quote {
+                    quote = ""
+                }
+                out = out + " "
+            }
+        }
+        i = i + 1
+    }
+    out
+}
+
+pub func count_content(content: str, lang: str) -> Counts {
+    c := zero()
+    // Markdown: code fences switch embedded language; prose counts as comments
+    // (matches tokei: Markdown row shows comments+blanks, code in child rows).
+    if lang == "Markdown" {
+        return count_markdown(content)
+    }
+    // Text/Json without comments: blanks + code only.
+    markers := languages.line_markers(lang)
+    pair := languages.block_pair(lang)
+    bstart := ""
+    bend := ""
+    if len(pair) == 2 {
+        bstart = pair[0]
+        bend = pair[1]
+    }
+    // Fast path: no comment syntax at all (Json, Text, etc).
+    // Avoids per-char string stripping which is O(n^2) on minified single-line files.
+    if len(markers) == 0 && bstart == "" {
+        lines := split_lines(content)
+        for raw in lines {
+            c.lines = c.lines + 1
+            if str.trim(raw) == "" {
+                c.blanks = c.blanks + 1
+            } else {
+                c.code = c.code + 1
+            }
+        }
+        c.files = 1
+        return c
+    }
+    // Ruby =begin/=end && Perl =cut are whole-line blocks.
+    whole_line_block := lang == "Ruby" || lang == "Perl"
+    lines := split_lines(content)
+    in_block := false
+    depth := 0
+    nested := lang == "Rust" || lang == "Swift" || lang == "Julia"
+    for raw in lines {
+        c.lines = c.lines + 1
+        t := str.trim(raw)
+        if t == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        if whole_line_block {
+            if t == bstart {
+                in_block = true
+                c.comments = c.comments + 1
+                continue
+            }
+            if t == bend {
+                in_block = false
+                c.comments = c.comments + 1
+                continue
+            }
+            if in_block {
+                c.comments = c.comments + 1
+                continue
+            }
+            if starts_with_any(t, markers) {
+                c.comments = c.comments + 1
+            } else {
+                c.code = c.code + 1
+            }
+            continue
+        }
+        // Inside block comment: look for end (nest-aware).
+        if in_block {
+            cleaned := strip_strings(raw)
+            if nested {
+                // count starts/ends on this line
+                si := 0
+                ei := 0
+                tmp := cleaned
+                while str.contains(tmp, bstart) {
+                    si = si + 1
+                    // advance past first occurrence (approx via split)
+                    parts := str.split(tmp, bstart)
+                    tmp = str.join(vec.remove(parts, 0), bstart)
+                    if tmp == cleaned {
+                        break
+                    }
+                }
+                tmp2 := cleaned
+                while str.contains(tmp2, bend) {
+                    ei = ei + 1
+                    parts := str.split(tmp2, bend)
+                    tmp2 = str.join(vec.remove(parts, 0), bend)
+                    if tmp2 == cleaned {
+                        break
+                    }
+                }
+                depth = depth + si - ei
+                if depth <= 0 {
+                    in_block = false
+                    depth = 0
+                }
+            } else {
+                if str.contains(cleaned, bend) {
+                    in_block = false
+                    // trailing code after */ counts as code
+                    after := str.split(cleaned, bend)
+                    tail := str.trim(after[len(after) - 1])
+                    if tail != "" && !starts_with_any(t, markers) {
+                        // mixed line: count as code (tokei counts code-biased)
+                        c.code = c.code + 1
+                        continue
+                    }
+                }
+            }
+            c.comments = c.comments + 1
+            continue
+        }
+        // Line comment at start (after trim)?
+        if starts_with_any(t, markers) {
+            c.comments = c.comments + 1
+            continue
+        }
+        cleaned := strip_strings(raw)
+        // Block start on this line?
+        if bstart != "" && str.contains(cleaned, bstart) {
+            if bend != "" && str.contains(cleaned, bend) {
+                // inline block on one line: check code before start
+                idx_parts := str.split(cleaned, bstart)
+                before := str.trim(idx_parts[0])
+                if before == "" {
+                    c.comments = c.comments + 1
+                } else {
+                    c.code = c.code + 1
+                }
+                continue
+            }
+            // multi-line block opens
+            idx_parts := str.split(cleaned, bstart)
+            before := str.trim(idx_parts[0])
+            in_block = true
+            depth = 1
+            if before == "" || starts_with_any(t, markers) {
+                c.comments = c.comments + 1
+            } else {
+                c.code = c.code + 1
+            }
+            continue
+        }
+        // Trailing line comment after code? e.g. `let x = 1 // hi`
+        found_comment := false
+        for m in markers {
+            if m != "" && str.contains(cleaned, m) {
+                found_comment = true
+            }
+        }
+        if found_comment {
+            c.code = c.code + 1
+        } else {
+            c.code = c.code + 1
+        }
+    }
+    c.files = 1
+    c
+}
+
+// Markdown: prose -> comments, fences -> embedded code counted via child map.
+// We return prose counts here; main.zz attributes fence blocks to inner langs
+// by re-running count_content on fence bodies.
+pub func count_markdown(content: str) -> Counts {
+    c := zero()
+    lines := split_lines(content)
+    in_fence := false
+    for raw in lines {
+        c.lines = c.lines + 1
+        t := str.trim(raw)
+        if str.starts_with(t, "```") {
+            if in_fence {
+                in_fence = false
+            } else {
+                in_fence = true
+            }
+            c.comments = c.comments + 1
+            continue
+        }
+        if in_fence {
+            // fence body lines are code of embedded lang; count as code here
+            // too so Markdown total lines balance, then main re-attributes.
+            if t == "" {
+                c.blanks = c.blanks + 1
+            } else {
+                c.code = c.code + 1
+            }
+            continue
+        }
+        if t == "" {
+            c.blanks = c.blanks + 1
+        } else {
+            c.comments = c.comments + 1
+        }
+    }
+    c.files = 1
+    c
+}
+
+// Extract fenced blocks: returns parallel arrays [lang, body].
+pub func markdown_fences(content: str) -> [str] {
+    langs := []
+    bodies := []
+    lines := split_lines(content)
+    in_fence := false
+    cur_lang := ""
+    cur := ""
+    for raw in lines {
+        t := str.trim(raw)
+        if str.starts_with(t, "```") {
+            if in_fence {
+                langs = vec.push(langs, cur_lang)
+                bodies = vec.push(bodies, cur)
+                cur = ""
+                cur_lang = ""
+                in_fence = false
+            } else {
+                tag := str.trim(str.split(t, "```")[1] ?? "")
+                // normalize fence tags to zcc language names
+                if tag == "bash" || tag == "sh" || tag == "shell" {
+                    tag = "BASH"
+                }
+                if tag == "rust" {
+                    tag = "Rust"
+                }
+                if tag == "python" || tag == "py" {
+                    tag = "Python"
+                }
+                if tag == "toml" {
+                    tag = "TOML"
+                }
+                if tag == "lua" {
+                    tag = "Lua"
+                }
+                if tag == "js" || tag == "javascript" {
+                    tag = "JavaScript"
+                }
+                if tag == "ts" || tag == "typescript" {
+                    tag = "TypeScript"
+                }
+                cur_lang = tag
+                in_fence = true
+            }
+            continue
+        }
+        if in_fence {
+            cur = cur + raw + "\n"
+        }
+    }
+    out := []
+    out = vec.push(out, str.join(langs, "\x01"))
+    out = vec.push(out, str.join(bodies, "\x02"))
+    out
+}

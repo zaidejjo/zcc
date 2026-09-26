@@ -1,0 +1,100 @@
+// zcc tests — run with `zz test`
+import counter
+import languages
+import walker
+import report
+
+@test
+func test_split_lines() {
+    assert_eq(len(counter.split_lines("")), 0)
+    assert_eq(len(counter.split_lines("a\nb\n")), 2)
+    assert_eq(len(counter.split_lines("a\nb")), 2)
+    assert_eq(counter.split_lines("a\nb\n")[0], "a")
+}
+
+@test
+func test_detect_rust() {
+    assert_eq(languages.detect_lang("main.rs"), "Rust")
+    assert_eq(languages.detect_lang("a/b.py"), "Python")
+    assert_eq(languages.detect_lang("Dockerfile"), "Dockerfile")
+    assert_eq(languages.detect_lang("Makefile"), "Makefile")
+    assert_eq(languages.detect_lang("foo.zz"), "ZZ")
+    assert_eq(languages.detect_lang("noext"), "")
+}
+
+@test
+func test_count_simple_rust() {
+    src := "// hi\nfn main() {\n\n    println!(\"hi\"); // trailing\n}\n"
+    c := counter.count_content(src, "Rust")
+    assert_eq(c.lines, 5)
+    assert_eq(c.comments, 1)
+    assert_eq(c.blanks, 1)
+    assert_eq(c.code, 3)
+}
+
+@test
+func test_count_block() {
+    src := "/* start\nmiddle\nend */\nlet x = 1;\n"
+    c := counter.count_content(src, "Rust")
+    assert_eq(c.comments, 3)
+    assert_eq(c.code, 1)
+}
+
+@test
+func test_count_python() {
+    src := "# hi\nx = 1\n\ny = 2 # trailing\n"
+    c := counter.count_content(src, "Python")
+    assert_eq(c.comments, 1)
+    assert_eq(c.blanks, 1)
+    assert_eq(c.code, 2)
+}
+
+@test
+func test_count_json_fastpath() {
+    src := "{\"a\": 1}"
+    c := counter.count_content(src, "Json")
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 0)
+}
+
+@test
+func test_count_markdown() {
+    src := "# Title\n\n```rust\nfn f() {}\n```\n\nprose\n"
+    c := counter.count_content(src, "Markdown")
+    assert(c.lines > 0)
+    assert(c.comments > 0)
+}
+
+@test
+func test_ignore_match() {
+    assert(walker.match_one("target/", "target/foo", false))
+    assert(walker.match_one("*.log", "a/b.log", false))
+    assert(!walker.match_one("*.log", "a/b.rs", false))
+    assert(walker.is_ignored_by("target/x", false, ["target/"]))
+    assert(!walker.is_ignored_by("src/x", false, ["target/"]))
+}
+
+@test
+func test_report_json() {
+    t := report.new_table()
+    t = report.add_row(t, "Rust", 2, 10, 7, 2, 1)
+    j := report.to_json(t)
+    assert(str_contains(j, "Rust"))
+    assert(str_contains(j, "total"))
+}
+
+func str_contains(s: str, sub: str) -> bool {
+    // minimal contains without extra import in test scope
+    i := 0
+    n := len(s) - len(sub) + 1
+    if n < 0 {
+        return false
+    }
+    while i < n {
+        if s[i:i + len(sub)] == sub {
+            return true
+        }
+        i = i + 1
+    }
+    false
+}

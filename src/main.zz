@@ -1,0 +1,254 @@
+// zcc — blazing-fast code counter (tokei clone) in ZZ.
+// Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
+import std.fs
+import std.str
+import std.vec
+import counter
+import languages
+import walker
+import report
+
+pub func VERSION() -> str {
+    "0.1.0"
+}
+
+func noop() {
+}
+
+func print_help() {
+    println("zcc {VERSION()} — code counter (tokei clone, ZZ native)")
+    println("")
+    println("USAGE:")
+    println("    zcc [path] [flags]")
+    println("")
+    println("ARGS:")
+    println("    [path]              directory or file (default: .)")
+    println("")
+    println("FLAGS:")
+    println("    --output json       machine-readable JSON to stdout")
+    println("    --hidden            include hidden files/dirs")
+    println("    --no-ignore         skip .gitignore rules (still skips .git)")
+    println("    --only LANG         count only this language (e.g. Rust)")
+    println("    --help, -h          show this help")
+    println("    --version, -V       show version")
+    println("")
+    println("CONFIG:")
+    println("    builtin languages.json + ~/.config/zcc/languages.json override")
+    println("    (Linux/macOS) or %APPDATA%\\zcc\\languages.json (Windows)")
+    println("")
+    println("EXAMPLES:")
+    println("    zcc .")
+    println("    zcc src/ --only Rust")
+    println("    zcc . --output json > counts.json")
+}
+
+func main(cli_args: [str]) {
+    // Hand-rolled flag parsing (robust vs leading "--" from `zz run --`).
+    target := "."
+    out_json := false
+    include_hidden := false
+    use_ignore := true
+    only := ""
+    show_help := false
+    show_ver := false
+    for a in cli_args {
+        if a == "--" {
+            continue
+        }
+        if a == "--help" || a == "-h" {
+            show_help = true
+            continue
+        }
+        if a == "--version" || a == "-V" {
+            show_ver = true
+            continue
+        }
+        if a == "--hidden" {
+            include_hidden = true
+            continue
+        }
+        if a == "--no-ignore" {
+            use_ignore = false
+            continue
+        }
+        if a == "--output=json" || a == "--output json" {
+            out_json = true
+            continue
+        }
+        if a == "--output" {
+            out_json = true
+            continue
+        }
+        if str.starts_with(a, "--output=") {
+            v := str.split(a, "=")[1]
+            if v == "json" {
+                out_json = true
+            }
+            continue
+        }
+        if a == "json" && out_json {
+            continue
+        }
+        if str.starts_with(a, "--only=") {
+            parts := str.split(a, "=")
+            if len(parts) > 1 {
+                only = parts[1]
+            }
+            continue
+        }
+        if a == "--only" {
+            only = "__NEXT__"
+            continue
+        }
+        if only == "__NEXT__" {
+            only = a
+            continue
+        }
+        if str.starts_with(a, "--") {
+            println("unknown flag: {a} (see --help)")
+            continue
+        }
+        // positional path (first wins)
+        if target == "." {
+            target = a
+        }
+    }
+    // handle `--output json` split form: next token "json" after --output
+    if show_help {
+        print_help()
+        return
+    }
+    if show_ver {
+        println("zcc {VERSION()}")
+        return
+    }
+    // resolve target
+    root := target
+    if root == "" {
+        root = "."
+    }
+    // single file mode
+    if fs.exists(root) && fs.is_file(root) {
+        run_single(root, only, out_json)
+        return
+    }
+    if !fs.exists(root) {
+        println("zcc: path not found: {root}")
+        return
+    }
+    run_dir(root, only, out_json, include_hidden, use_ignore)
+}
+
+func run_single(path: str, only: str, out_json: bool) {
+    lang := languages.resolve_lang(path)
+    if lang == "" {
+        println("zcc: unknown language for {path}")
+        return
+    }
+    if only != "" && only != "__NEXT__" && lang != only {
+        println("zcc: {path} is {lang}, filtered by --only {only}")
+        return
+    }
+    if walker.is_binary(path) {
+        println("zcc: skipping binary {path}")
+        return
+    }
+    match fs.read_to_string(path) {
+        .ok(text) => {
+            c := counter.count_content(text, lang)
+            t := report.new_table()
+            t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
+            if out_json {
+                println(report.to_json(t))
+            } else {
+                report.print_table(t)
+            }
+        },
+        .err(e) => println("zcc: cannot read {path}: {e}"),
+    }
+}
+
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool) {
+    pats := walker.load_patterns(root)
+    files := walker.walk_files(root, pats, use_ignore, include_hidden)
+    t := report.new_table()
+    // markdown embedded accumulators
+    emb_names := []
+    emb_files := []
+    emb_lines := []
+    emb_code := []
+    emb_comments := []
+    emb_blanks := []
+    counted := 0
+    for f in files {
+        lang := languages.resolve_lang(f)
+        if lang == "" {
+            continue
+        }
+        if only != "" && only != "__NEXT__" && lang != only {
+            continue
+        }
+        if walker.is_binary(f) {
+            continue
+        }
+        match fs.read_to_string(f) {
+            .ok(text) => {
+                c := counter.count_content(text, lang)
+                t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
+                counted = counted + 1
+                // markdown fences -> embedded langs
+                if lang == "Markdown" {
+                    fenced := counter.markdown_fences(text)
+                    if len(fenced) == 2 {
+                        lang_part := fenced[0]
+                        body_part := fenced[1]
+                        if lang_part != "" {
+                            llist := str.split(lang_part, "\x01")
+                            blist := str.split(body_part, "\x02")
+                            for i in 0..len(llist) {
+                                tag := llist[i]
+                                if tag == "" {
+                                    continue
+                                }
+                                body := ""
+                                if i < len(blist) {
+                                    body = blist[i]
+                                }
+                                // normalize display names
+                                disp := tag
+                                if disp == "BASH" {
+                                    disp = "BASH"
+                                }
+                                ec := counter.count_content(body, disp)
+                                // only keep known langs
+                                if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" {
+                                    emb_names = vec.push(emb_names, "└ " + disp)
+                                    emb_files = vec.push(emb_files, 1)
+                                    emb_lines = vec.push(emb_lines, ec.lines)
+                                    emb_code = vec.push(emb_code, ec.code)
+                                    emb_comments = vec.push(emb_comments, ec.comments)
+                                    emb_blanks = vec.push(emb_blanks, ec.blanks)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            .err(_) => noop(),
+        }
+    }
+    if counted == 0 {
+        println("zcc: no countable files under {root}")
+        return
+    }
+    if out_json {
+        println(report.to_json(t))
+    } else {
+        report.print_table(t)
+        // markdown breakdown like tokei screenshot
+        idx := report.find_lang(t, "Markdown")
+        if idx >= 0 && len(emb_names) > 0 {
+            report.print_markdown_breakdown(emb_names, emb_files, emb_lines, emb_code, emb_comments, emb_blanks)
+        }
+    }
+}

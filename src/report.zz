@@ -1,0 +1,198 @@
+// zcc/src/report.zz — tokei-style table + JSON output.
+import std.str
+import std.vec
+import std.colors
+
+pub func noop() {
+}
+
+// Aggregate rows: parallel arrays.
+pub struct Table { langs: [str], files: [int], lines: [int], code: [int], comments: [int], blanks: [int] }
+
+pub func new_table() -> Table {
+    Table{ langs: [], files: [], lines: [], code: [], comments: [], blanks: [] }
+}
+
+pub func find_lang(t: Table, lang: str) -> int {
+    i := 0
+    for l in t.langs {
+        if l == lang {
+            return i
+        }
+        i = i + 1
+    }
+    -1
+}
+
+pub func add_row(t: Table, lang: str, files: int, lines: int, code: int, comments: int, blanks: int) -> Table {
+    idx := find_lang(t, lang)
+    if idx >= 0 {
+        t.files[idx] = t.files[idx] + files
+        t.lines[idx] = t.lines[idx] + lines
+        t.code[idx] = t.code[idx] + code
+        t.comments[idx] = t.comments[idx] + comments
+        t.blanks[idx] = t.blanks[idx] + blanks
+        return t
+    }
+    t.langs = vec.push(t.langs, lang)
+    t.files = vec.push(t.files, files)
+    t.lines = vec.push(t.lines, lines)
+    t.code = vec.push(t.code, code)
+    t.comments = vec.push(t.comments, comments)
+    t.blanks = vec.push(t.blanks, blanks)
+    t
+}
+
+// Sort by code desc (bubble, n small).
+pub func sort_table(t: Table) -> Table {
+    n := len(t.langs)
+    i := 0
+    while i < n {
+        j := i + 1
+        while j < n {
+            if t.code[j] > t.code[i] {
+                tmp := t.langs[i]
+                t.langs[i] = t.langs[j]
+                t.langs[j] = tmp
+                ti := t.files[i]
+                t.files[i] = t.files[j]
+                t.files[j] = ti
+                ti = t.lines[i]
+                t.lines[i] = t.lines[j]
+                t.lines[j] = ti
+                ti = t.code[i]
+                t.code[i] = t.code[j]
+                t.code[j] = ti
+                ti = t.comments[i]
+                t.comments[i] = t.comments[j]
+                t.comments[j] = ti
+                ti = t.blanks[i]
+                t.blanks[i] = t.blanks[j]
+                t.blanks[j] = ti
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    t
+}
+
+pub func totals(t: Table) -> [int] {
+    tf := 0
+    tl := 0
+    tc := 0
+    tm := 0
+    tb := 0
+    for x in t.files {
+        tf = tf + x
+    }
+    for x in t.lines {
+        tl = tl + x
+    }
+    for x in t.code {
+        tc = tc + x
+    }
+    for x in t.comments {
+        tm = tm + x
+    }
+    for x in t.blanks {
+        tb = tb + x
+    }
+    [tf, tl, tc, tm, tb]
+}
+
+pub func print_table(t: Table) {
+    t = sort_table(t)
+    tot := totals(t)
+    // header
+    bar := "─────────────────────────────────────────────────────────────────"
+    println(bar)
+    h1 := str.pad_right("Language", 16, " ")
+    h2 := str.pad_left("Files", 8, " ")
+    h3 := str.pad_left("Lines", 10, " ")
+    h4 := str.pad_left("Code", 10, " ")
+    h5 := str.pad_left("Comments", 10, " ")
+    h6 := str.pad_left("Blanks", 10, " ")
+    println("{h1}{h2}{h3}{h4}{h5}{h6}" |> colors.cyan() |> colors.bold())
+    println(bar)
+    for i in 0..len(t.langs) {
+        lang := t.langs[i]
+        c1 := str.pad_right(lang, 16, " ")
+        c2 := str.pad_left(str(t.files[i]), 8, " ")
+        c3 := str.pad_left(str(t.lines[i]), 10, " ")
+        c4 := str.pad_left(str(t.code[i]), 10, " ")
+        c5 := str.pad_left(str(t.comments[i]), 10, " ")
+        c6 := str.pad_left(str(t.blanks[i]), 10, " ")
+        line := "{c1}{c2}{c3}{c4}{c5}{c6}"
+        // colorize language name (Markdown/Text plain like tokei)
+        if lang == "Markdown" || lang == "Text" {
+            println(line)
+        } else {
+            colored := c1 |> colors.green() |> colors.bold()
+            println(colored + "{c2}{c3}{c4}{c5}{c6}")
+        }
+    }
+    println(bar)
+    tc1 := str.pad_right("Total", 16, " ")
+    tc2 := str.pad_left(str(tot[0]), 8, " ")
+    tc3 := str.pad_left(str(tot[1]), 10, " ")
+    tc4 := str.pad_left(str(tot[2]), 10, " ")
+    tc5 := str.pad_left(str(tot[3]), 10, " ")
+    tc6 := str.pad_left(str(tot[4]), 10, " ")
+    println("{tc1}{tc2}{tc3}{tc4}{tc5}{tc6}" |> colors.cyan() |> colors.bold())
+}
+
+pub func print_markdown_breakdown(names: [str], files: [int], lines: [int], code: [int], comments: [int], blanks: [int]) {
+    if len(names) == 0 {
+        return
+    }
+    // aggregate embedded
+    t := new_table()
+    for i in 0..len(names) {
+        t = add_row(t, names[i], files[i], lines[i], code[i], comments[i], blanks[i])
+    }
+    t = sort_table(t)
+    for i in 0..len(t.langs) {
+        lang := t.langs[i]
+        c1 := str.pad_right(" ├ " + lang, 16, " ")
+        c2 := str.pad_left(str(t.files[i]), 8, " ")
+        c3 := str.pad_left(str(t.lines[i]), 10, " ")
+        c4 := str.pad_left(str(t.code[i]), 10, " ")
+        c5 := str.pad_left(str(t.comments[i]), 10, " ")
+        c6 := str.pad_left(str(t.blanks[i]), 10, " ")
+        println("{c1}{c2}{c3}{c4}{c5}{c6}")
+    }
+    tot := totals(t)
+    c1 := str.pad_right(" └ (Total)", 16, " ")
+    c2 := str.pad_left(str(tot[0]), 8, " ")
+    c3 := str.pad_left(str(tot[1]), 10, " ")
+    c4 := str.pad_left(str(tot[2]), 10, " ")
+    c5 := str.pad_left(str(tot[3]), 10, " ")
+    c6 := str.pad_left(str(tot[4]), 10, " ")
+    println("{c1}{c2}{c3}{c4}{c5}{c6}")
+}
+
+// JSON export (--output json). Manual build for full control.
+pub func escape_json(s: str) -> str {
+    e := str.replace(s, "\\", "\\\\")
+    e = str.replace(e, "\"", "\\\"")
+    e = str.replace(e, "\n", "\\n")
+    e
+}
+
+pub func to_json(t: Table) -> str {
+    t = sort_table(t)
+    tot := totals(t)
+    out := "{\"languages\":{"
+    first := true
+    for i in 0..len(t.langs) {
+        if !first {
+            out = out + ","
+        }
+        first = false
+        lang := escape_json(t.langs[i])
+        out = out + "\"{lang}\":{\"files\":{t.files[i]},\"lines\":{t.lines[i]},\"code\":{t.code[i]},\"comments\":{t.comments[i]},\"blanks\":{t.blanks[i]}}"
+    }
+    out = out + "},\"total\":{\"files\":{tot[0]},\"lines\":{tot[1]},\"code\":{tot[2]},\"comments\":{tot[3]},\"blanks\":{tot[4]}}}"
+    out
+}

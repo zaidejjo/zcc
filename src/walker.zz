@@ -1,0 +1,305 @@
+// zcc/src/ignore.zz — .gitignore handling + file walking.
+// Reads .gitignore / .ignore / .zccignore, filters walk_dir output.
+import std.fs
+import std.str
+import std.vec
+
+pub func noop() {
+}
+
+// Load patterns from root/.gitignore + .ignore + .zccignore.
+// Returns [patterns, negations] joined — negations prefixed with "!".
+pub func load_patterns(root: str) -> [str] {
+    pats := []
+    for fname in [".gitignore", ".ignore", ".zccignore"] {
+        p := fs.join(root, fname)
+        if fs.exists(p) && fs.is_file(p) {
+            match fs.read_to_string(p) {
+                .ok(text) => {
+                    lines := str.split(text, "\n")
+                    for raw in lines {
+                        t := str.trim(raw)
+                        if t == "" {
+                            continue
+                        }
+                        if str.starts_with(t, "#") {
+                            continue
+                        }
+                        pats = vec.push(pats, t)
+                    }
+                    noop()
+                },
+                .err(_) => noop(),
+            }
+        }
+    }
+    pats
+}
+
+// Simple glob: supports *, **, trailing /, leading /.
+// Negation (!) handled by caller.
+pub func match_one(pattern: str, rel: str, isdir: bool) -> bool {
+    if isdir {
+        noop()
+    }
+    pat := pattern
+    if str.starts_with(pat, "!") {
+        parts := str.split(pat, "!")
+        if len(parts) > 1 {
+            pat = parts[1]
+        } else {
+            pat = ""
+        }
+    }
+    if pat == "" {
+        return false
+    }
+    // dir-only pattern "target/" or "src/bin/"
+    if str.ends_with(pat, "/") {
+        // strip trailing slash -> "src/bin"
+        full := str.split(pat, "/")
+        base := ""
+        for s in full {
+            if s == "" {
+                continue
+            }
+            if base == "" {
+                base = s
+            } else {
+                base = base + "/" + s
+            }
+        }
+        if base == "" {
+            return false
+        }
+        if rel == base {
+            return true
+        }
+        if str.starts_with(rel, base + "/") {
+            return true
+        }
+        if str.contains(rel, "/" + base + "/") {
+            return true
+        }
+        if str.ends_with(rel, "/" + base) {
+            return true
+        }
+        return false
+    }
+    // ** handling: "a/**" prefix, "**/b" suffix
+    if str.contains(pat, "**") {
+        parts := str.split(pat, "**")
+        pre := str.trim(parts[0])
+        post := ""
+        if len(parts) > 1 {
+            post = str.trim(parts[1])
+        }
+        pre = str.trim(pre)
+        post = str.trim(post)
+        // strip slashes for contains check
+        if pre != "" {
+            pre = str.replace(pre, "/", "")
+            pre = str.replace(pre, "*", "")
+        }
+        if post != "" {
+            post = str.replace(post, "/", "")
+            post = str.replace(post, "*", "")
+        }
+        if pre != "" && post != "" {
+            return str.contains(rel, pre) && str.contains(rel, post)
+        }
+        if pre != "" {
+            return str.contains(rel, pre)
+        }
+        if post != "" {
+            return str.contains(rel, post)
+        }
+        return true
+    }
+    // single *: "*.log" suffix, "build*" prefix, "*test*" contains
+    if str.contains(pat, "*") {
+        clean := str.replace(pat, "*", "")
+        clean = str.replace(clean, "/", "")
+        if clean == "" {
+            return true
+        }
+        return str.contains(fs.basename(rel), clean)
+    }
+    // plain: exact basename or rel match or substring path segment
+    if pat == rel {
+        return true
+    }
+    if pat == fs.basename(rel) {
+        return true
+    }
+    if str.starts_with(pat, "/") {
+        slash_parts := str.split(pat, "/")
+        inner := pat
+        if len(slash_parts) > 1 {
+            inner = slash_parts[1]
+        }
+        if rel == inner {
+            return true
+        }
+        if str.starts_with(rel, inner + "/") {
+            return true
+        }
+        return false
+    }
+    if str.contains(rel, pat) {
+        // segment-aware: match full path segments only
+        if rel == pat {
+            return true
+        }
+        if str.starts_with(rel, pat + "/") {
+            return true
+        }
+        if str.ends_with(rel, "/" + pat) {
+            return true
+        }
+        if str.contains(rel, "/" + pat + "/") {
+            return true
+        }
+        return false
+    }
+    false
+}
+
+pub func is_ignored_by(rel: str, isdir: bool, pats: [str]) -> bool {
+    if isdir {
+        noop()
+    }
+    ignored := false
+    for pat in pats {
+        if str.starts_with(pat, "!") {
+            bang := str.split(pat, "!")
+            inner := ""
+            if len(bang) > 1 {
+                inner = bang[1]
+            }
+            if inner != "" && match_one(inner, rel, isdir) {
+                ignored = false
+            }
+            continue
+        }
+        if match_one(pat, rel, isdir) {
+            ignored = true
+        }
+    }
+    ignored
+}
+
+// Always-skip dirs (unless --no-ignore): VCS, build, deps.
+pub func default_skip(name: str) -> bool {
+    if name == ".git" || name == ".hg" || name == ".svn" {
+        return true
+    }
+    if name == "target" || name == "node_modules" || name == "vendor" {
+        return true
+    }
+    if name == "bin" || name == "build" || name == ".zz_test_cache" {
+        return true
+    }
+    if name == "__pycache__" || name == ".idea" || name == ".vscode" {
+        return true
+    }
+    false
+}
+
+pub func rel_path(root: str, full: str) -> str {
+    if str.starts_with(full, root + "/") {
+        parts := str.split(full, root + "/")
+        if len(parts) > 1 {
+            return parts[1]
+        }
+        return full
+    }
+    if full == root {
+        return "."
+    }
+    full
+}
+
+// Walk + filter. Returns file paths only.
+pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bool) -> [str] {
+    out := []
+    base := root
+    if base == "" {
+        base = "."
+    }
+    match fs.walk_dir(base) {
+        .ok(paths) => {
+            for p in paths {
+                if !fs.is_file(p) {
+                    continue
+                }
+                rel := rel_path(base, p)
+                b := fs.basename(p)
+                // hidden?
+                if !include_hidden {
+                    if str.starts_with(b, ".") {
+                        continue
+                    }
+                    if str.contains(rel, "/.") {
+                        continue
+                    }
+                }
+                // default skips on any segment
+                skip := false
+                segs := str.split(rel, "/")
+                for s in segs {
+                    if default_skip(s) {
+                        skip = true
+                    }
+                }
+                // also check full rel against default dir names
+                if skip && use_ignore {
+                    continue
+                }
+                if !use_ignore && skip {
+                    // --no-ignore still skips .git (safety) but keeps target etc?
+                    // Keep .git skipped always; allow the rest.
+                    only_git := false
+                    for s in segs {
+                        if s == ".git" || s == ".hg" || s == ".svn" {
+                            only_git = true
+                        }
+                    }
+                    if only_git {
+                        continue
+                    }
+                }
+                if use_ignore && is_ignored_by(rel, false, pats) {
+                    continue
+                }
+                out = vec.push(out, p)
+            }
+            noop()
+        },
+        .err(_) => noop(),
+    }
+    out
+}
+
+// Binary sniff: NUL byte in first 8k => skip.
+pub func is_binary(path: str) -> bool {
+    match fs.read_bytes(path) {
+        .ok(b) => {
+            n := len(b)
+            if n == 0 {
+                return false
+            }
+            limit := n
+            if limit > 8000 {
+                limit = 8000
+            }
+            for i in 0..limit {
+                if b[i] == 0 {
+                    return true
+                }
+            }
+            false
+        },
+        .err(_) => false,
+    }
+}
