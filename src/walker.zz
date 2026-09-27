@@ -281,6 +281,13 @@ pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bo
     out
 }
 
+// NUL check on already-read text: lets callers read each file ONCE
+// (read_to_string is strict UTF-8, so non-UTF8 binaries already fail
+// the read; NUL is valid UTF-8, so it needs this explicit check).
+pub func has_nul(s: str) -> bool {
+    str.contains(s, "\x00")
+}
+
 // Binary sniff: NUL byte in first 8k => skip.
 pub func is_binary(path: str) -> bool {
     match fs.read_bytes(path) {

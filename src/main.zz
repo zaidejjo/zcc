@@ -140,7 +140,8 @@ func main(cli_args: [str]) {
 }
 
 func run_single(path: str, only: str, out_json: bool) {
-    lang := languages.resolve_lang(path)
+    table := languages.load_lang_table()
+    lang := languages.resolve_lang_with(table, path)
     if lang == "" {
         println("zcc: unknown language for {path}")
         return
@@ -149,12 +150,12 @@ func run_single(path: str, only: str, out_json: bool) {
         println("zcc: {path} is {lang}, filtered by --only {only}")
         return
     }
-    if walker.is_binary(path) {
-        println("zcc: skipping binary {path}")
-        return
-    }
     match fs.read_to_string(path) {
         .ok(text) => {
+            if walker.has_nul(text) {
+                println("zcc: skipping binary {path}")
+                return
+            }
             c := counter.count_content(text, lang)
             t := report.new_table()
             t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
@@ -171,6 +172,7 @@ func run_single(path: str, only: str, out_json: bool) {
 func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool) {
     pats := walker.load_patterns(root)
     files := walker.walk_files(root, pats, use_ignore, include_hidden)
+    table := languages.load_lang_table()
     t := report.new_table()
     // markdown embedded accumulators
     emb_names := []
@@ -181,18 +183,22 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     emb_blanks := []
     counted := 0
     for f in files {
-        lang := languages.resolve_lang(f)
+        // Cheap string-only checks first: zero IO for unknown/filtered-out.
+        lang := languages.resolve_lang_with(table, f)
         if lang == "" {
             continue
         }
         if only != "" && only != "__NEXT__" && lang != only {
             continue
         }
-        if walker.is_binary(f) {
-            continue
-        }
+        // Single read per file: strict UTF-8 read rejects non-UTF8
+        // binaries; has_nul catches the rest. (Was: full read_bytes
+        // scan + full read_to_string = 2x IO per file.)
         match fs.read_to_string(f) {
             .ok(text) => {
+                if walker.has_nul(text) {
+                    continue
+                }
                 c := counter.count_content(text, lang)
                 t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
                 counted = counted + 1

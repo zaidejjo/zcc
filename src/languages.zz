@@ -434,17 +434,47 @@ pub func json_lookup_lang(path: str) -> str {
     json_file_lookup(upath, path)
 }
 
-pub func json_file_lookup(cfg: str, path: str) -> str {
+// Load + parse the language table ONCE. Returns json.null() when no
+// config exists or parsing fails. Callers pass the result to
+// resolve_lang_with per file — previously every file re-read and
+// re-parsed languages.json (2 stats + full read + parse per file).
+pub func load_lang_table() -> json {
+    upath := user_languages_path()
+    cfg := ""
+    if fs.exists(upath) {
+        cfg = upath
+    }
+    if cfg == "" && fs.exists("languages.json") {
+        cfg = "languages.json"
+    }
+    if cfg == "" {
+        return json.null()
+    }
     match fs.read_to_string(cfg) {
         .ok(text) => {
             match json.parse(text) {
                 .ok(root) => {
                     if json.type(root) != "object" {
-                        return ""
+                        return json.null()
                     }
-                    base := fs.basename(path)
-                    ext := str.to_lower(fs.extension(path))
-                    names := json.keys(root)
+                    root
+                },
+                .err(_) => json.null(),
+            }
+        },
+        .err(_) => json.null(),
+    }
+}
+
+// Lookup inside an already-loaded table. Returns "" on miss;
+// json.null() tables miss immediately (zero IO).
+pub func table_lookup(root: json, path: str) -> str {
+    if json.type(root) != "object" {
+        return ""
+    }
+    base := fs.basename(path)
+    ext := str.to_lower(fs.extension(path))
+    names := json.keys(root)
                     for name in names {
                         match json.get(root, name) {
                             .ok(langobj) => {
@@ -499,12 +529,26 @@ pub func json_file_lookup(cfg: str, path: str) -> str {
                         }
                     }
                     ""
-                },
+}
+
+pub func json_file_lookup(cfg: str, path: str) -> str {
+    match fs.read_to_string(cfg) {
+        .ok(text) => {
+            match json.parse(text) {
+                .ok(root) => table_lookup(root, path),
                 .err(_) => "",
             }
         },
         .err(_) => "",
     }
+}
+
+pub func resolve_lang_with(root: json, path: str) -> str {
+    custom := table_lookup(root, path)
+    if custom != "" {
+        return custom
+    }
+    detect_lang(path)
 }
 
 pub func resolve_lang(path: str) -> str {

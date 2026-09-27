@@ -3,6 +3,9 @@ import counter
 import languages
 import walker
 import report
+import std.time
+import std.fs
+import std.env
 
 @test
 func test_split_lines() {
@@ -10,6 +13,87 @@ func test_split_lines() {
     assert_eq(len(counter.split_lines("a\nb\n")), 2)
     assert_eq(len(counter.split_lines("a\nb")), 2)
     assert_eq(counter.split_lines("a\nb\n")[0], "a")
+}
+
+@test
+func test_big_project_ms() {
+    // End-to-end: generate a 40-file synthetic project, count it like
+    // run_dir does, assert totals + wall-clock budget. Guards against
+    // blowups like the split_lines infinite recursion (1.5GB hang).
+    base := fs.join(env.temp_dir(), "zcc_perf_proj")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+    match fs.mkdir_all(fs.join(base, "src")) {
+        .ok(_) => walker.noop(),
+        .err(e) => fail("mkdir: {e}"),
+    }
+    body := ""
+    for i in 0..100 {
+        body = body + "    let x = 1; // trailing\n"
+    }
+    chunk := "// header comment\n" + body + "/* block\nmiddle\nend */\n"
+    t0 := time.now_ms()
+    for i in 0..40 {
+        ext := "rs"
+        if i % 4 == 1 {
+            ext = "py"
+        } else {
+            if i % 4 == 2 {
+                ext = "js"
+            } else {
+                if i % 4 == 3 {
+                    ext = "md"
+                }
+            }
+        }
+        content := chunk
+        if ext == "md" {
+            content = "# Title\n\n```rust\nfn f() {}\n```\n\nprose\n"
+        }
+        if ext == "py" {
+            content = "# header comment\n" + body + "\"\"\" block\nmiddle\nend \"\"\"\n"
+        }
+        path := fs.join(fs.join(base, "src"), "mod" + str(i) + "." + ext)
+        match fs.write(path, content) {
+            .ok(_) => walker.noop(),
+            .err(e) => fail("write: {e}"),
+        }
+    }
+    files := walker.walk_files(base, [], true, false)
+    table := languages.load_lang_table()
+    t := report.new_table()
+    counted := 0
+    total_lines := 0
+    for f in files {
+        lang := languages.resolve_lang_with(table, f)
+        if lang == "" {
+            continue
+        }
+        match fs.read_to_string(f) {
+            .ok(text) => {
+                if walker.has_nul(text) {
+                    continue
+                }
+                c := counter.count_content(text, lang)
+                t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
+                counted = counted + 1
+                total_lines = total_lines + c.lines
+            },
+            .err(_) => walker.noop(),
+        }
+    }
+    elapsed := time.now_ms() - t0
+    println("perf: {counted} files, {total_lines} lines in {elapsed}ms")
+    assert_eq(len(files), 40)
+    assert_eq(counted, 40)
+    assert(total_lines > 3000)
+    assert(elapsed < 60000)
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
 }
 
 @test
