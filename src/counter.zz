@@ -27,6 +27,24 @@ pub func is_blank(s: str) -> bool {
     str.trim(s) == ""
 }
 
+// True when blanking strings could change classification: line has a
+// quote AND a comment marker or block opener. Lets most lines skip the
+// per-char strip loop entirely (native contains calls are Rust speed).
+pub func needs_strip(line: str, markers: [str], bstart: str) -> bool {
+    if !str.contains(line, "\"") && !str.contains(line, "'") && !str.contains(line, "`") {
+        return false
+    }
+    for m in markers {
+        if m != "" && str.contains(line, m) {
+            return true
+        }
+    }
+    if bstart != "" && str.contains(line, bstart) {
+        return true
+    }
+    false
+}
+
 pub func starts_with_any(s: str, markers: [str]) -> bool {
     for m in markers {
         if m != "" && str.starts_with(s, m) {
@@ -141,30 +159,15 @@ pub func count_content(content: str, lang: str) -> Counts {
         }
         // Inside block comment: look for end (nest-aware).
         if in_block {
-            cleaned := strip_strings(raw)
+            cleaned := raw
+            if needs_strip(raw, markers, bstart) {
+                cleaned = strip_strings(raw)
+            }
             if nested {
-                // count starts/ends on this line
-                si := 0
-                ei := 0
-                tmp := cleaned
-                while str.contains(tmp, bstart) {
-                    si = si + 1
-                    // advance past first occurrence (approx via split)
-                    parts := str.split(tmp, bstart)
-                    tmp = str.join(vec.remove(parts, 0), bstart)
-                    if tmp == cleaned {
-                        break
-                    }
-                }
-                tmp2 := cleaned
-                while str.contains(tmp2, bend) {
-                    ei = ei + 1
-                    parts := str.split(tmp2, bend)
-                    tmp2 = str.join(vec.remove(parts, 0), bend)
-                    if tmp2 == cleaned {
-                        break
-                    }
-                }
+                // str.count is one native split per call (Rust speed);
+                // the old while split/join loop re-scanned per occurrence.
+                si := str.count(cleaned, bstart)
+                ei := str.count(cleaned, bend)
                 depth = depth + si - ei
                 if depth <= 0 {
                     in_block = false
@@ -191,13 +194,37 @@ pub func count_content(content: str, lang: str) -> Counts {
             c.comments = c.comments + 1
             continue
         }
-        cleaned := strip_strings(raw)
-        // Block start on this line?
+        cleaned := raw
+        if needs_strip(raw, markers, bstart) {
+            cleaned = strip_strings(raw)
+        }
+        // Block start on this line? (single split shared by both branches)
         if bstart != "" && str.contains(cleaned, bstart) {
+            idx_parts := str.split(cleaned, bstart)
+            before := str.trim(idx_parts[0])
+            // Opener sitting inside a line comment (`code // /*`)?
+            // Then no block opens: classify by code before the marker.
+            commented := false
+            commented_code := false
+            for m in markers {
+                if m != "" && str.contains(before, m) {
+                    commented = true
+                    seg := str.split(before, m)[0]
+                    if str.trim(seg) != "" {
+                        commented_code = true
+                    }
+                }
+            }
+            if commented {
+                if commented_code {
+                    c.code = c.code + 1
+                } else {
+                    c.comments = c.comments + 1
+                }
+                continue
+            }
             if bend != "" && str.contains(cleaned, bend) {
                 // inline block on one line: check code before start
-                idx_parts := str.split(cleaned, bstart)
-                before := str.trim(idx_parts[0])
                 if before == "" {
                     c.comments = c.comments + 1
                 } else {
@@ -206,8 +233,6 @@ pub func count_content(content: str, lang: str) -> Counts {
                 continue
             }
             // multi-line block opens
-            idx_parts := str.split(cleaned, bstart)
-            before := str.trim(idx_parts[0])
             in_block = true
             depth = 1
             if before == "" || starts_with_any(t, markers) {
@@ -217,18 +242,8 @@ pub func count_content(content: str, lang: str) -> Counts {
             }
             continue
         }
-        // Trailing line comment after code? e.g. `let x = 1 // hi`
-        found_comment := false
-        for m in markers {
-            if m != "" && str.contains(cleaned, m) {
-                found_comment = true
-            }
-        }
-        if found_comment {
-            c.code = c.code + 1
-        } else {
-            c.code = c.code + 1
-        }
+        // Anything left uncommented on the line is code.
+        c.code = c.code + 1
     }
     c.files = 1
     c

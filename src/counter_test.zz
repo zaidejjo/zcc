@@ -97,6 +97,40 @@ func test_big_project_ms() {
 }
 
 @test
+func test_line_comment_wins_over_block() {
+    // `/*` inside a `//` comment must not open a block (old quirk).
+    src := "let x = 1; // /* unclosed\nlet y = 2;\n"
+    c := counter.count_content(src, "Rust")
+    assert_eq(c.lines, 2)
+    assert_eq(c.code, 2)
+    assert_eq(c.comments, 0)
+}
+
+@test
+func test_string_with_markers() {
+    src := "x := \"a // b\";\ny := 1;\n"
+    c := counter.count_content(src, "ZZ")
+    assert_eq(c.code, 2)
+    assert_eq(c.comments, 0)
+}
+
+@test
+func test_nested_block() {
+    src := "/* a /* b */ c */\nx := 1;\n"
+    c := counter.count_content(src, "Rust")
+    assert_eq(c.comments, 1)
+    assert_eq(c.code, 1)
+}
+
+@test
+func test_inline_block_then_code() {
+    src := "/* x */\nlet y = 2; // trailing\n"
+    c := counter.count_content(src, "Rust")
+    assert_eq(c.comments, 1)
+    assert_eq(c.code, 1)
+}
+
+@test
 func test_detect_rust() {
     assert_eq(languages.detect_lang("main.rs"), "Rust")
     assert_eq(languages.detect_lang("a/b.py"), "Python")
