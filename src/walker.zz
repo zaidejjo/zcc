@@ -207,12 +207,25 @@ pub func default_skip(name: str) -> bool {
 }
 
 pub func rel_path(root: str, full: str) -> str {
-    if str.starts_with(full, root + "/") {
-        parts := str.split(full, root + "/")
-        if len(parts) > 1 {
-            return parts[1]
+    # NOTE: single-char splits/joins only — AOT str.split with a
+    # multi-char separator drops the remainder (toolchain bug), so a
+    # previous `split(full, root + "/")` version returned "" natively
+    # and silently disabled every rel-based skip rule.
+    prefix := root + "/"
+    if str.starts_with(full, prefix) {
+        rsegs := str.split(full, "/")
+        pcount := len(str.split(root, "/"))
+        out := ""
+        first := true
+        for i in pcount..len(rsegs) {
+            if first {
+                out = rsegs[i]
+                first = false
+            } else {
+                out = out + "/" + rsegs[i]
+            }
         }
-        return full
+        return out
     }
     if full == root {
         return "."
@@ -227,6 +240,10 @@ pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bo
     if base == "" {
         base = "."
     }
+    // Normalize trailing slashes so rel_path prefixing holds.
+    while len(base) > 1 && str.ends_with(base, "/") {
+        base = base[:len(base) - 1]
+    }
     match fs.walk_dir(base) {
         .ok(paths) => {
             for p in paths {
@@ -238,6 +255,9 @@ pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bo
                 // hidden?
                 if !include_hidden {
                     if str.starts_with(b, ".") {
+                        continue
+                    }
+                    if str.starts_with(rel, ".") {
                         continue
                     }
                     if str.contains(rel, "/.") {

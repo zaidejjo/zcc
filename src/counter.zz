@@ -27,6 +27,59 @@ pub func is_blank(s: str) -> bool {
     str.trim(s) == ""
 }
 
+// Char-by-char occurrence count that skips string literals. Used for
+// nested block depth instead of str.count: its separator (e.g. "/*")
+// is multi-char, which AOT str.split mishandles (drops matches).
+pub func count_occurs_skip_strings(line: str, pat: str) -> int {
+    n := 0
+    m := len(pat)
+    if m == 0 {
+        return 0
+    }
+    i := 0
+    total := len(line)
+    while i + m <= total {
+        ch := line[i]
+        if ch == "\"" || ch == "'" || ch == "`" {
+            i = skip_string(line, i)
+            continue
+        }
+        is_match := true
+        for k in 0..m {
+            if line[i + k] != pat[k] {
+                is_match = false
+            }
+        }
+        if is_match {
+            n = n + 1
+            i = i + m
+        } else {
+            i = i + 1
+        }
+    }
+    n
+}
+
+// Skip a string literal starting at pos (line[pos] is a quote).
+// Returns index just past the closing quote (or end if unterminated).
+pub func skip_string(line: str, pos: int) -> int {
+    quote := line[pos]
+    i := pos + 1
+    n := len(line)
+    while i < n {
+        ch := line[i]
+        if ch == "\\" {
+            i = i + 2
+            continue
+        }
+        if ch == quote {
+            return i + 1
+        }
+        i = i + 1
+    }
+    n
+}
+
 // True when blanking strings could change classification: line has a
 // quote AND a comment marker or block opener. Lets most lines skip the
 // per-char strip loop entirely (native contains calls are Rust speed).
@@ -306,7 +359,13 @@ pub func markdown_fences(content: str) -> [str] {
                 cur_lang = ""
                 in_fence = false
             } else {
-                tag := str.trim(str.split(t, "```")[1] ?? "")
+                // NOTE: single backtick split — AOT str.split with the
+                // multi-char "```" separator drops the tag.
+                tag := ""
+                tick_parts := str.split(t, "`")
+                if len(tick_parts) > 3 {
+                    tag = str.trim(tick_parts[3])
+                }
                 // normalize fence tags to zcc language names
                 if tag == "bash" || tag == "sh" || tag == "shell" {
                     tag = "BASH"
