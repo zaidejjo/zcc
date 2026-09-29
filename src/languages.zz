@@ -639,3 +639,75 @@ pub func resolve_lang(path: str) -> str {
     }
     detect_lang(path)
 }
+
+// ── Table-driven comment rules (custom languages) ────────────────────────────
+// languages.json entries carry line/block_start/block_end arrays. Builtin
+// languages keep their hardcoded rules below (stable counts); these table
+// lookups supply rules for languages the hardcode doesn't know (user
+// customs via languages.json or config.json).
+
+pub func json_field(o: json, key: str) -> json {
+    if json.type(o) != "object" {
+        return json.null()
+    }
+    if !json.has(o, key) {
+        return json.null()
+    }
+    match json.get(o, key) {
+        .ok(v) => v,
+        .err(_) => json.null(),
+    }
+}
+
+pub func table_str_list(root: json, lang: str, field: str) -> [str] {
+    out := []
+    langobj := json_field(root, lang)
+    if json.type(langobj) != "object" {
+        return out
+    }
+    arr := json_field(langobj, field)
+    if json.type(arr) != "array" {
+        return out
+    }
+    n := json.len(arr)
+    for i in 0..n {
+        match json.get(arr, str(i)) {
+            .ok(v) => {
+                if json.type(v) == "string" {
+                    out = vec.push(out, json.as_str(v))
+                }
+            },
+            .err(_) => noop(),
+        }
+    }
+    out
+}
+
+// [line markers, block starts, block ends] for lang.
+//
+// Precedence (stable counts first):
+// - custom languages named in `customs` (config.json) use their table
+//   rules wholesale — full-replace semantics, like extensions/files.
+// - builtin languages keep hardcoded rules, even where the JSON table
+//   disagrees (Bash `: '`, Vue `//`, ...): existing counts never shift.
+// - anything else (Json/Text/Markdown, unknown): table lists, usually
+//   empty, which selects the no-comment fast path.
+pub func resolve_markers(table: json, lang: str, customs: [str]) -> [[str]] {
+    for c in customs {
+        if c == lang {
+            return [table_str_list(table, lang, "line"), table_str_list(table, lang, "block_start"), table_str_list(table, lang, "block_end")]
+        }
+    }
+    lines := line_markers(lang)
+    pair := block_pair(lang)
+    if len(lines) > 0 || len(pair) > 0 {
+        starts := []
+        ends := []
+        if len(pair) == 2 {
+            starts = [pair[0]]
+            ends = [pair[1]]
+        }
+        return [lines, starts, ends]
+    }
+    [table_str_list(table, lang, "line"), table_str_list(table, lang, "block_start"), table_str_list(table, lang, "block_end")]
+}

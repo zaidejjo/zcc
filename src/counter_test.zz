@@ -4,10 +4,12 @@ import languages
 import walker
 import report
 import cache
+import config
 import std.time
 import std.fs
 import std.env
 import std.json
+import std.str
 
 @test
 func test_split_lines() {
@@ -228,6 +230,91 @@ func test_cache_missing_is_null() {
     assert(json.type(files) == "null")
     e := cache.lookup_entry(files, "whatever.rs")
     assert(json.type(e) == "null")
+}
+
+@test
+func test_emb_base_lang() {
+    assert_eq(report.emb_base_lang("└ Rust"), "Rust")
+    assert_eq(report.emb_base_lang("└ BASH"), "BASH")
+    assert_eq(report.emb_base_lang("Rust"), "Rust")
+    assert_eq(report.emb_base_lang(""), "")
+}
+
+@test
+func test_theme_from_config() {
+    th := config.build_theme(json.null())
+    assert(th.color)
+    assert_eq(th.header, "cyan")
+    assert_eq(th.language, "green")
+    assert_eq(report.theme_lang_color(th, "Rust"), "")
+    match json.parse("{\"display\": {\"color\": false, \"header\": \"#ff0000\", \"language\": \"255,0,0\", \"total\": \"red\", \"languages\": {\"Rust\": \"bright_blue\", \"Go\": \"notacolor\"}}}") {
+        .ok(cfg) => {
+            t2 := config.build_theme(cfg)
+            assert(!t2.color)
+            assert_eq(t2.header, "#ff0000")
+            assert_eq(t2.language, "255,0,0")
+            assert_eq(t2.total, "red")
+            assert_eq(report.theme_lang_color(t2, "Rust"), "bright_blue")
+            assert_eq(report.theme_lang_color(t2, "Zig"), "")
+            // apply_color honors the off switch + specs
+            assert_eq(report.apply_color(t2, "red", "x"), "x")
+            assert_eq(report.apply_color(th, "red", "x") == "x", false)
+            assert_eq(report.apply_color(th, "#ff0000", "x") == "x", false)
+            assert_eq(report.apply_color(th, "255,0,0", "x") == "x", false)
+            assert_eq(report.apply_color(th, "notacolor", "x"), "x")
+            assert_eq(report.apply_color(th, "", "x"), "x")
+            assert(report.is_plain_lang(th, "Markdown"))
+            assert(!report.is_plain_lang(th, "Rust"))
+        },
+        .err(_) => fail("config json must parse"),
+    }
+}
+
+@test
+func test_custom_lang_end_to_end() {
+    match json.parse("{\"languages\": {\"MyLang\": {\"extensions\": [\"myl\"], \"files\": [\"Myfile\"], \"line\": [\"#\"], \"block_start\": [\"/*\"], \"block_end\": [\"*/\"]}}}") {
+        .ok(cfg) => {
+            table := config.lang_table_with(cfg)
+            em := languages.build_ext_map(table)
+            assert_eq(languages.resolve_fast(em, "a/myl.myl"), "MyLang")
+            assert_eq(languages.resolve_fast(em, "Myfile"), "MyLang")
+            rules := languages.resolve_markers(table, "MyLang", ["MyLang"])
+            assert_eq(rules[0], ["#"])
+            assert_eq(rules[1], ["/*"])
+            assert_eq(rules[2], ["*/"])
+            c := counter.count_content_with("# hi\nx = 1\n/* b\nq */\n", "MyLang", rules[0], rules[1][0], rules[2][0])
+            assert_eq(c.lines, 4)
+            assert_eq(c.comments, 3)
+            assert_eq(c.code, 1)
+            // builtin rules untouched by customs
+            rr := languages.resolve_markers(table, "Rust", ["MyLang"])
+            assert_eq(rr[0], ["//"])
+        },
+        .err(_) => fail("custom lang json must parse"),
+    }
+}
+
+@test
+func test_count_with_matches_plain() {
+    // count_content_with with hardcoded-equivalent rules == count_content.
+    for lang in ["Rust", "Python", "Bash", "Json", "Text"] {
+        src := "// c\ncode();\n# py\n"
+        a := counter.count_content(src, lang)
+        m := languages.resolve_markers(json.null(), lang, [])
+        b0 := ""
+        b1 := ""
+        if len(m[1]) > 0 {
+            b0 = m[1][0]
+        }
+        if len(m[2]) > 0 {
+            b1 = m[2][0]
+        }
+        b := counter.count_content_with(src, lang, m[0], b0, b1)
+        assert_eq(a.lines, b.lines)
+        assert_eq(a.code, b.code)
+        assert_eq(a.comments, b.comments)
+        assert_eq(a.blanks, b.blanks)
+    }
 }
 
 @test

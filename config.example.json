@@ -1,0 +1,21 @@
+{
+  "display": {
+    "color": true,
+    "header": "cyan",
+    "language": "green",
+    "total": "cyan",
+    "languages": {
+      "Rust": "#ff5500",
+      "Python": "255,165,0"
+    }
+  },
+  "languages": {
+    "MyLang": {
+      "extensions": ["myl"],
+      "files": ["Myfile"],
+      "line": ["#"],
+      "block_start": ["/*"],
+      "block_end": ["*/"]
+    }
+  }
+}

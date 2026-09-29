@@ -1,0 +1,176 @@
+// zcc/src/config.zz — ~/.config/zcc/config.json: display theme + custom languages.
+//
+//   {
+//     "display": {
+//       "color": true,                 // false disables all color (also NO_COLOR=1)
+//       "header": "cyan",              // table header + total hue
+//       "language": "green",           // default language-name hue
+//       "total": "cyan",
+//       "languages": { "Rust": "#ff5500", "Python": "255,165,0" }
+//     },
+//     "languages": {
+//       "MyLang": {
+//         "extensions": ["myl"], "files": ["Myfile"],
+//         "line": ["#"], "block_start": ["/*"], "block_end": ["*/"]
+//       }
+//     }
+//   }
+//
+// Hues: color name (green, cyan, bright_red, ...), "#rrggbb"/"#rgb" hex,
+// or "r,g,b". Unknown hues render plain (never an error).
+// Custom languages merge over builtin + languages.json entries: the whole
+// entry is replaced per name. Comment rules apply to NEW languages;
+// builtin languages keep their hardcoded rules (stable counts).
+import std.fs
+import std.str
+import std.vec
+import std.json
+import std.env
+import languages
+import report
+
+func noop() {
+}
+
+pub func config_path() -> str {
+    dir := languages.config_dir()
+    if env.os() == "windows" {
+        dir + "\\config.json"
+    } else {
+        dir + "/config.json"
+    }
+}
+
+// Parsed config object, or json.null() when missing/unparsable
+// (callers fall back to defaults: never an error).
+pub func load_config() -> json {
+    p := config_path()
+    if !fs.exists(p) {
+        return json.null()
+    }
+    match fs.read_to_string(p) {
+        .ok(text) => {
+            match json.parse(text) {
+                .ok(j) => {
+                    if json.type(j) != "object" {
+                        return json.null()
+                    }
+                    j
+                },
+                .err(_) => json.null(),
+            }
+        },
+        .err(_) => json.null(),
+    }
+}
+
+pub func obj_field(o: json, key: str) -> json {
+    if json.type(o) != "object" {
+        return json.null()
+    }
+    if !json.has(o, key) {
+        return json.null()
+    }
+    match json.get(o, key) {
+        .ok(v) => v,
+        .err(_) => json.null(),
+    }
+}
+
+pub func obj_str(o: json, key: str, fallback: str) -> str {
+    v := obj_field(o, key)
+    if json.type(v) != "string" {
+        return fallback
+    }
+    json.as_str(v)
+}
+
+pub func obj_bool(o: json, key: str, fallback: bool) -> bool {
+    v := obj_field(o, key)
+    if json.type(v) == "bool" {
+        return json.as_bool(v)
+    }
+    if json.type(v) == "string" {
+        s := str.to_lower(str.trim(json.as_str(v)))
+        if s == "true" || s == "1" || s == "yes" || s == "on" {
+            return true
+        }
+        if s == "false" || s == "0" || s == "no" || s == "off" {
+            return false
+        }
+    }
+    fallback
+}
+
+// "languages" custom-language object, or null.
+pub func custom_langs(cfg: json) -> json {
+    v := obj_field(cfg, "languages")
+    if json.type(v) != "object" {
+        return json.null()
+    }
+    v
+}
+
+// Names of custom languages defined in the config (for rule precedence).
+pub func custom_names(cfg: json) -> [str] {
+    out := []
+    c := custom_langs(cfg)
+    if json.type(c) != "object" {
+        return out
+    }
+    for k in json.keys(c) {
+        out = vec.push(out, k)
+    }
+    out
+}
+
+// Full language table: builtin + user languages.json + config customs
+// (later wins per language name).
+pub func lang_table_with(cfg: json) -> json {
+    t := languages.load_lang_table()
+    c := custom_langs(cfg)
+    if json.type(c) != "object" {
+        return t
+    }
+    if json.type(t) != "object" {
+        return c
+    }
+    json.merge(t, c)
+}
+
+pub func build_theme(cfg: json) -> report.Theme {
+    color := true
+    header := "cyan"
+    language := "green"
+    total := "cyan"
+    names := []
+    specs := []
+    match env.get("NO_COLOR") {
+        .some(_) => {
+            color = false
+        },
+        .none => noop(),
+    }
+    disp := obj_field(cfg, "display")
+    if json.type(disp) == "object" {
+        color = obj_bool(disp, "color", color)
+        header = obj_str(disp, "header", header)
+        language = obj_str(disp, "language", language)
+        total = obj_str(disp, "total", total)
+        lm := obj_field(disp, "languages")
+        if json.type(lm) == "object" {
+            for k in json.keys(lm) {
+                match json.get(lm, k) {
+                    .ok(v) => {
+                        if json.type(v) == "string" {
+                            names = vec.push(names, k)
+                            specs = vec.push(specs, json.as_str(v))
+                        }
+                    },
+                    .err(_) => noop(),
+                }
+            }
+        }
+    }
+    report.make_theme(color, header, language, total, names, specs)
+}

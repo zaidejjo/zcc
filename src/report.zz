@@ -6,6 +6,135 @@ import std.colors
 pub func noop() {
 }
 
+// Display theme: hues are specs resolved by apply_color — a color name
+// (green, cyan, bright_red, ...), "#rrggbb" / "#rgb" hex, or "r,g,b".
+// names/specs are per-language overrides ("Rust" -> "#ff5500").
+pub struct Theme { color: bool, header: str, language: str, total: str, names: [str], specs: [str] }
+
+pub func default_theme() -> Theme {
+    Theme{ color: true, header: "cyan", language: "green", total: "cyan", names: [], specs: [] }
+}
+
+// Cross-module constructor (struct literals are same-module only).
+// NOTE: branch on the flag with literal inits — initializing a bool
+// field directly from a bool parameter miscompiles in AOT
+// (`zz_bool(boxed)`; toolchain bug), so keep params out of struct inits.
+pub func make_theme(color: bool, header: str, language: str, total: str, names: [str], specs: [str]) -> Theme {
+    if color {
+        return Theme{ color: true, header: header, language: language, total: total, names: names, specs: specs }
+    }
+    Theme{ color: false, header: header, language: language, total: total, names: names, specs: specs }
+}
+
+pub func theme_lang_color(th: Theme, lang: str) -> str {
+    for i in 0..len(th.names) {
+        if th.names[i] == lang {
+            return th.specs[i]
+        }
+    }
+    ""
+}
+
+pub func apply_color(th: Theme, spec: str, s: str) -> str {
+    if !th.color {
+        return s
+    }
+    if spec == "" {
+        return s
+    }
+    if str.starts_with(spec, "#") {
+        return colors.hex(s, spec)
+    }
+    if str.contains(spec, ",") {
+        parts := str.split(spec, ",")
+        if len(parts) == 3 {
+            r := int(str.trim(parts[0])) ?? -1
+            g := int(str.trim(parts[1])) ?? -1
+            b := int(str.trim(parts[2])) ?? -1
+            if r >= 0 && g >= 0 && b >= 0 {
+                return colors.rgb(s, r, g, b)
+            }
+        }
+        return s
+    }
+    if spec == "black" {
+        return colors.black(s)
+    }
+    if spec == "red" {
+        return colors.red(s)
+    }
+    if spec == "green" {
+        return colors.green(s)
+    }
+    if spec == "yellow" {
+        return colors.yellow(s)
+    }
+    if spec == "blue" {
+        return colors.blue(s)
+    }
+    if spec == "magenta" {
+        return colors.magenta(s)
+    }
+    if spec == "cyan" {
+        return colors.cyan(s)
+    }
+    if spec == "white" {
+        return colors.white(s)
+    }
+    if spec == "bright_black" {
+        return colors.bright_black(s)
+    }
+    if spec == "bright_red" {
+        return colors.bright_red(s)
+    }
+    if spec == "bright_green" {
+        return colors.bright_green(s)
+    }
+    if spec == "bright_yellow" {
+        return colors.bright_yellow(s)
+    }
+    if spec == "bright_blue" {
+        return colors.bright_blue(s)
+    }
+    if spec == "bright_magenta" {
+        return colors.bright_magenta(s)
+    }
+    if spec == "bright_cyan" {
+        return colors.bright_cyan(s)
+    }
+    if spec == "bright_white" {
+        return colors.bright_white(s)
+    }
+    s
+}
+
+// Language cell: per-language override wins; Markdown/Text stay plain
+// unless explicitly overridden; otherwise the default language hue.
+pub func is_plain_lang(th: Theme, lang: str) -> bool {
+    if theme_lang_color(th, lang) != "" {
+        return false
+    }
+    lang == "Markdown" || lang == "Text"
+}
+
+pub func maybe_bold(th: Theme, s: str) -> str {
+    if !th.color {
+        return s
+    }
+    colors.bold(s)
+}
+
+pub func lang_cell(th: Theme, lang: str, cell: str) -> str {
+    ov := theme_lang_color(th, lang)
+    if ov != "" {
+        return maybe_bold(th, apply_color(th, ov, cell))
+    }
+    if lang == "Markdown" || lang == "Text" {
+        return cell
+    }
+    maybe_bold(th, apply_color(th, th.language, cell))
+}
+
 // Aggregate rows: parallel arrays.
 pub struct Table { langs: [str], files: [int], lines: [int], code: [int], comments: [int], blanks: [int] }
 
@@ -101,7 +230,13 @@ pub func totals(t: Table) -> [int] {
     [tf, tl, tc, tm, tb]
 }
 
-pub func print_table(t: Table) {
+pub func print_table(t: Table, th: Theme) {
+    print_table_full(t, new_table(), th)
+}
+
+// Full table: embedded Markdown-fence rows nest directly under the
+// Markdown row (tokei style), Total closes the table last.
+pub func print_table_full(t: Table, emb: Table, th: Theme) {
     t = sort_table(t)
     tot := totals(t)
     // header
@@ -113,7 +248,7 @@ pub func print_table(t: Table) {
     h4 := str.pad_left("Code", 10, " ")
     h5 := str.pad_left("Comments", 10, " ")
     h6 := str.pad_left("Blanks", 10, " ")
-    println("{h1}{h2}{h3}{h4}{h5}{h6}" |> colors.cyan() |> colors.bold())
+    println(maybe_bold(th, apply_color(th, th.header, "{h1}{h2}{h3}{h4}{h5}{h6}")))
     println(bar)
     for i in 0..len(t.langs) {
         lang := t.langs[i]
@@ -124,12 +259,13 @@ pub func print_table(t: Table) {
         c5 := str.pad_left(str(t.comments[i]), 10, " ")
         c6 := str.pad_left(str(t.blanks[i]), 10, " ")
         line := "{c1}{c2}{c3}{c4}{c5}{c6}"
-        // colorize language name (Markdown/Text plain like tokei)
-        if lang == "Markdown" || lang == "Text" {
+        if is_plain_lang(th, lang) {
             println(line)
         } else {
-            colored := c1 |> colors.green() |> colors.bold()
-            println(colored + "{c2}{c3}{c4}{c5}{c6}")
+            println(lang_cell(th, lang, c1) + "{c2}{c3}{c4}{c5}{c6}")
+        }
+        if lang == "Markdown" && len(emb.langs) > 0 {
+            print_emb_rows(emb, th)
         }
     }
     println(bar)
@@ -139,17 +275,29 @@ pub func print_table(t: Table) {
     tc4 := str.pad_left(str(tot[2]), 10, " ")
     tc5 := str.pad_left(str(tot[3]), 10, " ")
     tc6 := str.pad_left(str(tot[4]), 10, " ")
-    println("{tc1}{tc2}{tc3}{tc4}{tc5}{tc6}" |> colors.cyan() |> colors.bold())
+    println(maybe_bold(th, apply_color(th, th.total, "{tc1}{tc2}{tc3}{tc4}{tc5}{tc6}")))
 }
 
-pub func print_markdown_breakdown(names: [str], files: [int], lines: [int], code: [int], comments: [int], blanks: [int]) {
-    if len(names) == 0 {
+// Display prefix ("└ Rust") back to the language name for override
+// lookup. Byte-safe: splits on ASCII space, never slices multibyte.
+pub func emb_base_lang(lang: str) -> str {
+    if str.starts_with(lang, "└ ") {
+        parts := str.split(lang, " ")
+        if len(parts) > 1 {
+            return parts[1]
+        }
+    }
+    lang
+}
+
+pub func print_emb_rows(emb: Table, th: Theme) {
+    if len(emb.langs) == 0 {
         return
     }
     // aggregate embedded
     t := new_table()
-    for i in 0..len(names) {
-        t = add_row(t, names[i], files[i], lines[i], code[i], comments[i], blanks[i])
+    for i in 0..len(emb.langs) {
+        t = add_row(t, emb.langs[i], emb.files[i], emb.lines[i], emb.code[i], emb.comments[i], emb.blanks[i])
     }
     t = sort_table(t)
     for i in 0..len(t.langs) {
@@ -160,7 +308,15 @@ pub func print_markdown_breakdown(names: [str], files: [int], lines: [int], code
         c4 := str.pad_left(str(t.code[i]), 10, " ")
         c5 := str.pad_left(str(t.comments[i]), 10, " ")
         c6 := str.pad_left(str(t.blanks[i]), 10, " ")
-        println("{c1}{c2}{c3}{c4}{c5}{c6}")
+        line := "{c1}{c2}{c3}{c4}{c5}{c6}"
+        // emb rows follow per-language overrides only (default plain).
+        base := emb_base_lang(lang)
+        ov := theme_lang_color(th, base)
+        if ov != "" && th.color {
+            println(colors.dim(maybe_bold(th, apply_color(th, ov, c1))))
+        } else {
+            println(line)
+        }
     }
     tot := totals(t)
     c1 := str.pad_right(" └ (Total)", 16, " ")

@@ -2,7 +2,7 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 5.)
+// (Upstream cache-invalidation bug; entry rev 8.)
 import std.fs
 import std.str
 import std.vec
@@ -12,6 +12,7 @@ import languages
 import walker
 import report
 import cache
+import config
 
 pub func VERSION() -> str {
     "0.1.0"
@@ -41,6 +42,13 @@ func print_help() {
     println("CONFIG:")
     println("    builtin languages.json + ~/.config/zcc/languages.json override")
     println("    (Linux/macOS) or %APPDATA%\\zcc\\languages.json (Windows)")
+    println("    ~/.config/zcc/config.json: display theme + custom languages")
+    println("      {\"display\": {\"color\": true, \"header\": \"cyan\",")
+    println("       \"language\": \"green\", \"total\": \"cyan\",")
+    println("       \"languages\": {\"Rust\": \"#ff5500\"}},")
+    println("       \"languages\": {\"MyLang\": {\"extensions\": [\"myl\"],")
+    println("        \"files\": [], \"line\": [\"#\"],")
+    println("        \"block_start\": [\"/*\"], \"block_end\": [\"*/\"]}}}")
     println("")
     println("EXAMPLES:")
     println("    zcc .")
@@ -151,7 +159,10 @@ func main(cli_args: [str]) {
 }
 
 func run_single(path: str, only: str, out_json: bool) {
-    table := languages.load_lang_table()
+    cfg := config.load_config()
+    th := config.build_theme(cfg)
+    table := config.lang_table_with(cfg)
+    customs := config.custom_names(cfg)
     em := languages.build_ext_map(table)
     lang := languages.resolve_fast(em, path)
     if lang == "" {
@@ -168,13 +179,14 @@ func run_single(path: str, only: str, out_json: bool) {
                 println("zcc: skipping binary {path}")
                 return
             }
-            c := counter.count_content(text, lang)
+            rules := languages.resolve_markers(table, lang, customs)
+            c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
             t := report.new_table()
             t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
             if out_json {
                 println(report.to_json(t))
             } else {
-                report.print_table(t)
+                report.print_table(t, th)
             }
         },
         .err(e) => println("zcc: cannot read {path}: {e}"),
@@ -184,7 +196,10 @@ func run_single(path: str, only: str, out_json: bool) {
 func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool) {
     pats := walker.load_patterns(root)
     files := walker.walk_files(root, pats, use_ignore, include_hidden)
-    table := languages.load_lang_table()
+    cfg := config.load_config()
+    th := config.build_theme(cfg)
+    table := config.lang_table_with(cfg)
+    customs := config.custom_names(cfg)
     em := languages.build_ext_map(table)
     cached := json.null()
     cached_n := 0
@@ -240,7 +255,8 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 if walker.has_nul(text) {
                     continue
                 }
-                c := counter.count_content(text, lang)
+                rules := languages.resolve_markers(table, lang, customs)
+                c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
                 t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
                 counted = counted + 1
                 fenc := ""
@@ -271,27 +287,16 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     if out_json {
         println(report.to_json(t))
     } else {
-        report.print_table(t)
-        // markdown breakdown like tokei screenshot
-        idx := report.find_lang(t, "Markdown")
-        if idx >= 0 && len(emb.langs) > 0 {
-            emb_names := []
-            emb_files := []
-            emb_lines := []
-            emb_code := []
-            emb_comments := []
-            emb_blanks := []
-            for i in 0..len(emb.langs) {
-                emb_names = vec.push(emb_names, emb.langs[i])
-                emb_files = vec.push(emb_files, emb.files[i])
-                emb_lines = vec.push(emb_lines, emb.lines[i])
-                emb_code = vec.push(emb_code, emb.code[i])
-                emb_comments = vec.push(emb_comments, emb.comments[i])
-                emb_blanks = vec.push(emb_blanks, emb.blanks[i])
-            }
-            report.print_markdown_breakdown(emb_names, emb_files, emb_lines, emb_code, emb_comments, emb_blanks)
-        }
+        report.print_table_full(t, emb, th)
     }
+}
+
+// First element or "" (block start/end singletons from resolve_markers).
+pub func rule_str(xs: [str]) -> str {
+    if len(xs) > 0 {
+        return xs[0]
+    }
+    ""
 }
 
 // Extract fenced-code rows from one Markdown body as a raw emb

@@ -85,13 +85,6 @@ pub func blank_strings(line: str) -> str {
 }
 
 pub func count_content(content: str, lang: str) -> Counts {
-    c := zero()
-    // Markdown: code fences switch embedded language; prose counts as comments
-    // (matches tokei: Markdown row shows comments+blanks, code in child rows).
-    if lang == "Markdown" {
-        return count_markdown(content)
-    }
-    // Text/Json without comments: blanks + code only.
     markers := languages.line_markers(lang)
     pair := languages.block_pair(lang)
     bstart := ""
@@ -99,6 +92,18 @@ pub func count_content(content: str, lang: str) -> Counts {
     if len(pair) == 2 {
         bstart = pair[0]
         bend = pair[1]
+    }
+    count_content_with(content, lang, markers, bstart, bend)
+}
+
+// Same count with pre-resolved rules (custom languages via table).
+// Callers pass resolve_markers(table, lang) unpacked.
+pub func count_content_with(content: str, lang: str, markers: [str], bstart: str, bend: str) -> Counts {
+    c := zero()
+    // Markdown: code fences switch embedded language; prose counts as comments
+    // (matches tokei: Markdown row shows comments+blanks, code in child rows).
+    if lang == "Markdown" {
+        return count_markdown(content)
     }
     // Fast path: no comment syntax at all (Json, Text, etc).
     // Avoids per-char string stripping which is O(n^2) on minified single-line files.
