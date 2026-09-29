@@ -2,7 +2,7 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 11.)
+// (Upstream cache-invalidation bug; entry rev 12.)
 import std.fs
 import std.str
 import std.vec
