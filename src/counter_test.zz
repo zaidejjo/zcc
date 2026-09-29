@@ -320,10 +320,10 @@ func test_init_config() {
                     th := config.build_theme(cfg)
                     assert(th.color)
                     assert_eq(th.header, "cyan")
-                    assert_eq(report.theme_lang_color(th, "Rust"), "")
+                    assert_eq(report.theme_lang_color(th, "Rust"), "#ff5500")
+                    assert_eq(report.theme_lang_color(th, "Zig"), "")
                     langs := config.custom_names(cfg)
-                    assert_eq(len(langs), 1)
-                    assert_eq(langs[0], "MyLang")
+                    assert_eq(len(langs), 0)
                 },
                 .err(_) => fail("written config must parse"),
             }
