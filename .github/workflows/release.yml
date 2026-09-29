@@ -1,0 +1,143 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zcc
+
+      - name: Install Clang
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang
+
+      - name: Check out ZZ toolchain at pinned rev
+        uses: actions/checkout@v4
+        with:
+          repository: zaidejjo/zz
+          path: zz
+
+      - name: Enforce pinned toolchain
+        run: |
+          PIN=$(tr -d '[:space:]' < zcc/packaging/zz.rev)
+          git -C zz fetch --depth 1 origin "$PIN"
+          git -C zz checkout "$PIN"
+          echo "toolchain: $(git -C zz rev-parse HEAD)"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install zz
+        run: |
+          cargo install --path zz/crates/zz_cli --root "$HOME/.local"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Stamp version from tag
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          sed -i "s/^    \"0\.1\.0\"$/    \"$VERSION\"/" zcc/src/main.zz
+          sed -i "s/^version = \"0\.1\.0\"$/version = \"$VERSION\"/" zcc/zz.toml
+          grep -n "\"$VERSION\"" zcc/src/main.zz zcc/zz.toml
+
+      - name: Test + release build
+        working-directory: zcc
+        run: |
+          zz test
+          zz build -p src/main.zz
+          ./src/bin/main --no-cache . --output json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['total'])"
+
+      - name: Package artifacts
+        run: |
+          cd zcc
+          mkdir -p dist "zcc-$VERSION"
+          cp src/bin/main "zcc-$VERSION/zcc"
+          cp README.md LICENSE config.example.json config.example-zz.json "zcc-$VERSION/"
+          tar -czf "dist/zcc-$VERSION-linux-x86_64.tar.gz" -C "zcc-$VERSION" .
+          git archive --format=tar.gz --prefix="zcc-$VERSION/" -o "dist/zcc-$VERSION-src.tar.gz" HEAD
+          # NOTE: git archive captures the *tag* tree (unstamped version);
+          # the stamped files above go only into the binary tarball.
+          # The AUR PKGBUILD re-stamps via its own sed; see packaging/aur.
+          cd dist && sha256sum ./*.tar.gz > sha256sums.txt && cat sha256sums.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd zcc/dist
+          gh release create "${{ github.ref_name }}" \
+            --title "zcc ${{ env.VERSION }}" \
+            --generate-notes \
+            "zcc-${{ env.VERSION }}-linux-x86_64.tar.gz" \
+            "zcc-${{ env.VERSION }}-src.tar.gz" \
+            sha256sums.txt
+
+      - name: Upload source tarball for AUR job
+        uses: actions/upload-artifact@v4
+        with:
+          name: src-tarball
+          path: |
+            zcc/dist/zcc-${{ env.VERSION }}-src.tar.gz
+            zcc/dist/sha256sums.txt
+
+  aur:
+    needs: build
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zcc
+          ref: ${{ github.ref }}
+
+      - name: Install tools
+        run: pacman -Sy --noconfirm git openssh base-devel
+
+      - name: Fetch source tarball hash
+        uses: actions/download-artifact@v4
+        with:
+          name: src-tarball
+          path: /tmp/artifacts
+
+      - name: Render PKGBUILD + SRCINFO
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          SHA=$(awk "/zcc-$VERSION-src.tar.gz/ {print \$1}" /tmp/artifacts/sha256sums.txt)
+          ZZREV=$(tr -d '[:space:]' < zcc/packaging/zz.rev)
+          test -n "$SHA" && test -n "$ZZREV"
+          mkdir -p aurpkg
+          sed -e "s/@PKGVER@/$VERSION/g" -e "s/@SHA256@/$SHA/g" -e "s/@_ZZ_REV@/$ZZREV/g" \
+            zcc/packaging/aur/PKGBUILD.template > aurpkg/PKGBUILD
+          cd aurpkg && makepkg --printsrcinfo > .SRCINFO && cat PKGBUILD
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$AUR_SSH_PRIVATE_KEY" || { echo "missing AUR_SSH_PRIVATE_KEY secret"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
+          git config --global user.name "zcc-ci"
+          git config --global user.email "zcc-ci@users.noreply.github.com"
+          # First release ever: the AUR repo does not exist yet, so clone
+          # fails and we initialise it locally instead.
+          git clone ssh://aur@aur.archlinux.org/zcc.git aurpush 2>/dev/null || {
+            mkdir -p aurpush && git -C aurpush init -b master
+          }
+          cp aurpkg/PKGBUILD aurpkg/.SRCINFO aurpush/
+          git -C aurpush add PKGBUILD .SRCINFO
+          git -C aurpush -c user.name="zcc-ci" -c user.email="zcc-ci@users.noreply.github.com" \
+            commit -m "zcc ${GITHUB_REF#refs/tags/v}" || echo "nothing to commit"
+          git -C aurpush remote get-url origin 2>/dev/null || \
+            git -C aurpush remote add origin ssh://aur@aur.archlinux.org/zcc.git
+          git -C aurpush push origin master

@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: zcc
+
+      - name: Install Clang
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang
+
+      - name: Check out ZZ toolchain
+        uses: actions/checkout@v4
+        with:
+          repository: zaidejjo/zz
+          path: zz
+      # The exact toolchain rev comes from packaging/zz.rev (fetched and
+      # checked out below); the initial checkout is only a starting point.
+      - name: Enforce pinned toolchain
+        run: |
+          PIN=$(tr -d '[:space:]' < zcc/packaging/zz.rev)
+          GOT=$(git -C zz rev-parse HEAD)
+          # Shallow/dev drift check: fetch the pinned rev explicitly.
+          git -C zz fetch --depth 1 origin "$PIN"
+          git -C zz checkout "$PIN"
+          echo "toolchain: $(git -C zz rev-parse HEAD) (pin $PIN)"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install zz
+        run: |
+          cargo install --path zz/crates/zz_cli --root "$HOME/.local"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: zz test
+        working-directory: zcc
+        run: zz test
+
+      - name: Release build
+        working-directory: zcc
+        run: zz build -p src/main.zz
+
+      - name: Smoke test
+        working-directory: zcc
+        run: |
+          ./src/bin/main --no-cache . --output json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['total']['files'] > 0; print(d['total'])"
+          ./src/bin/main --version
+          ./src/bin/main init --help 2>/dev/null || ./src/bin/main --help | head -n 5
