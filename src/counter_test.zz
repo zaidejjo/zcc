@@ -320,6 +320,7 @@ func test_init_config() {
                     th := config.build_theme(cfg)
                     assert(th.color)
                     assert_eq(th.header, "cyan")
+                    assert_eq(report.theme_lang_color(th, "ZZ"), "#1e8ffb")
                     assert_eq(report.theme_lang_color(th, "Rust"), "#ff5500")
                     assert_eq(report.theme_lang_color(th, "Zig"), "")
                     langs := config.custom_names(cfg)

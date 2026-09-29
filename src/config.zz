@@ -36,7 +36,7 @@ func noop() {
 // Edit entries to customize (see config.example.json in the repo).
 // Embedded so `zcc init` works from an installed binary anywhere.
 pub func default_config_text() -> str {
-    "{\n  \"display\": {\n    \"color\": true,\n    \"header\": \"cyan\",\n    \"language\": \"green\",\n    \"total\": \"cyan\",\n    \"languages\": {\n      \"Rust\": \"#ff5500\"\n    }\n  },\n  \"languages\": {}\n}\n"
+    "{\n  \"display\": {\n    \"color\": true,\n    \"header\": \"cyan\",\n    \"language\": \"green\",\n    \"total\": \"cyan\",\n    \"languages\": {\n      \"ZZ\": \"#1e8ffb\",\n      \"Rust\": \"#ff5500\"\n    }\n  },\n  \"languages\": {}\n}\n"
 }
 
 // Write the default config into dir (created if missing). Returns a
