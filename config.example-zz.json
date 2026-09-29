@@ -1,0 +1,22 @@
+{
+  "display": {
+    "color": true,
+    "header": "bright_cyan",
+    "language": "green",
+    "total": "bright_cyan",
+    "languages": {
+      "ZZ": "#c792ea",
+      "Rust": "#ff5370",
+      "Markdown": "yellow"
+    }
+  },
+  "languages": {
+    "ZZ": {
+      "extensions": ["zz"],
+      "files": [],
+      "line": ["//", "#"],
+      "block_start": ["/*"],
+      "block_end": ["*/"]
+    }
+  }
+}

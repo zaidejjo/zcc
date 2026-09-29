@@ -32,7 +32,9 @@ disabled (strip with `--output json` for scripts, or set color off).
 
 All customization lives in one JSON file (see `config.example.json`).
 Missing file, bad JSON, or unknown keys all fall back to defaults —
-the config can never break a run.
+the config can never break a run. Samples: `config.example.json`
+(full schema), `config.example-zz.json` (ZZ theme + restated ZZ
+rules — copy to `~/.config/zcc/config.json` and tweak).
 
 ```json
 {
