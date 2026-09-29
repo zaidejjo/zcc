@@ -233,6 +233,63 @@ func test_cache_missing_is_null() {
 }
 
 @test
+func test_is_generated() {
+    assert(walker.is_generated("a/bundle.min.js"))
+    assert(walker.is_generated("a/app.min.css"))
+    assert(walker.is_generated("dist/app.bundle.js"))
+    assert(walker.is_generated("x/package-lock.json"))
+    assert(walker.is_generated("Cargo.lock"))
+    assert(walker.is_generated("y/yarn.lock"))
+    assert(walker.is_generated("a/msg.pb.go"))
+    assert(walker.is_generated("a/msg.pb.py"))
+    assert(walker.is_generated("a/msg_pb2.py"))
+    assert(walker.is_generated("a/foo_generated.rs"))
+    assert(walker.is_generated("a/foo.generated.ts"))
+    assert(walker.is_generated("a/generated/b.py"))
+    assert(walker.is_generated("generated/b.py"))
+    assert(!walker.is_generated("a/app.js"))
+    assert(!walker.is_generated("a/main.rs"))
+    assert(!walker.is_generated("a/generate.py"))
+    assert(!walker.is_generated("a/Cargo.toml"))
+    assert(!walker.is_generated("a/lockfile.txt"))
+}
+
+@test
+func test_top_by_lines() {
+    idx := report.top_by_lines([5, 20, 10], 2)
+    assert_eq(len(idx), 2)
+    assert_eq(idx[0], 1)
+    assert_eq(idx[1], 2)
+    assert_eq(len(report.top_by_lines([5, 20, 10], 0)), 0)
+    assert_eq(len(report.top_by_lines([5, 20, 10], 99)), 3)
+    assert_eq(len(report.top_by_lines([], 5)), 0)
+    assert_eq(report.display_path("short.rs"), "short.rs")
+    long := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/b.rs"
+    assert_eq(report.display_path(long), "..." + long[len(long) - 41:len(long)])
+}
+
+@test
+func test_files_json_shape() {
+    t := report.new_table()
+    t = report.add_row(t, "Rust", 1, 10, 7, 2, 1)
+    j := report.to_json_full(t, ["a.rs", "b.rs"], ["Rust", "Rust"], [10, 3], [7, 3], [2, 0], [1, 0], 5)
+    assert(str_contains(j, "\"files\":["))
+    assert(str_contains(j, "a.rs"))
+    assert(str_contains(j, "\"language\":\"Rust\""))
+    // both documents must be valid JSON (balanced braces regression)
+    match json.parse(j) {
+        .ok(_) => walker.noop(),
+        .err(_) => fail("to_json_full is not valid JSON"),
+    }
+    match json.parse(report.to_json(t)) {
+        .ok(_) => walker.noop(),
+        .err(_) => fail("to_json is not valid JSON"),
+    }
+    // plain json unchanged (no files key)
+    assert(!str_contains(report.to_json(t), "\"files\":["))
+}
+
+@test
 func test_emb_base_lang() {
     assert_eq(report.emb_base_lang("└ Rust"), "Rust")
     assert_eq(report.emb_base_lang("└ BASH"), "BASH")

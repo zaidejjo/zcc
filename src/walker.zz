@@ -385,6 +385,46 @@ pub func default_skip(name: str) -> bool {
     false
 }
 
+// Generated files (bundles, lockfiles, protobuf, codegen output) count
+// into a separate "Generated" row, never into language totals. v1 is
+// filename/dir rules only (no content sniffing).
+pub func is_generated(path: str) -> bool {
+    b := fs.basename(path)
+    if str.ends_with(b, ".min.js") || str.ends_with(b, ".min.css") {
+        return true
+    }
+    if str.ends_with(b, ".bundle.js") || str.ends_with(b, "-bundle.js") {
+        return true
+    }
+    if b == "package-lock.json" || b == "yarn.lock" || b == "Gemfile.lock" {
+        return true
+    }
+    if b == "composer.lock" || b == "Cargo.lock" || b == "Podfile.lock" {
+        return true
+    }
+    if b == "poetry.lock" || b == "pnpm-lock.yaml" {
+        return true
+    }
+    if str.ends_with(b, ".pb.go") || str.ends_with(b, ".pb.cc") {
+        return true
+    }
+    if str.ends_with(b, ".pb.h") || str.ends_with(b, ".pb.py") {
+        return true
+    }
+    if str.ends_with(b, "_pb2.py") || str.ends_with(b, ".g.dart") {
+        return true
+    }
+    if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
+        return true
+    }
+    // generated/ anywhere in the path (scanning generated/ itself marks
+    // everything inside it generated, which is the honest answer).
+    if str.contains(path, "/generated/") || str.starts_with(path, "generated/") {
+        return true
+    }
+    false
+}
+
 pub func rel_path(root: str, full: str) -> str {
     # NOTE: single-char splits/joins only — AOT str.split with a
     # multi-char separator drops the remainder (toolchain bug), so a

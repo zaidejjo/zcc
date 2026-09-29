@@ -2,7 +2,7 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 16.)
+// (Upstream cache-invalidation bug; entry rev 18.)
 import std.fs
 import std.str
 import std.vec
@@ -36,6 +36,8 @@ func print_help() {
     println("    --no-ignore         skip .gitignore rules (still skips .git)")
     println("    --no-cache          skip the count cache (always recount)")
     println("    --only LANG         count only this language (e.g. Rust)")
+    println("    --by-file           list top files by lines after the table")
+    println("    --top N             files shown with --by-file (default 20)")
     println("    --help, -h          show this help")
     println("    --version, -V       show version")
     println("")
@@ -63,6 +65,9 @@ func main(cli_args: [str]) {
     include_hidden := false
     use_ignore := true
     use_cache := true
+    by_file := false
+    topn := 20
+    top_next := false
     only := ""
     show_help := false
     show_ver := false
@@ -88,6 +93,24 @@ func main(cli_args: [str]) {
         }
         if a == "--no-cache" {
             use_cache = false
+            continue
+        }
+        if a == "--by-file" {
+            by_file = true
+            continue
+        }
+        if str.starts_with(a, "--top=") {
+            parts := str.split(a, "=")
+            if len(parts) > 1 {
+                topn = int(parts[1]) ?? 20
+                if topn < 1 {
+                    topn = 20
+                }
+            }
+            continue
+        }
+        if a == "--top" {
+            top_next = true
             continue
         }
         if a == "--output=json" || a == "--output json" {
@@ -123,6 +146,14 @@ func main(cli_args: [str]) {
             only = a
             continue
         }
+        if top_next {
+            topn = int(a) ?? 20
+            if topn < 1 {
+                topn = 20
+            }
+            top_next = false
+            continue
+        }
         if str.starts_with(a, "--") {
             println("unknown flag: {a} (see --help)")
             continue
@@ -155,7 +186,7 @@ func main(cli_args: [str]) {
         println("zcc: path not found: {root}")
         return
     }
-    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache)
+    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn)
 }
 
 func run_single(path: str, only: str, out_json: bool) {
@@ -193,7 +224,7 @@ func run_single(path: str, only: str, out_json: bool) {
     }
 }
 
-func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool) {
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int) {
     pats := walker.load_patterns(root)
     files := walker.walk_files(root, pats, use_ignore, include_hidden)
     cfg := config.load_config()
@@ -212,6 +243,13 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     t := report.new_table()
     emb := report.new_table()
     saverows := []
+    // per-file rows for --by-file (parallel arrays; aggregated above too)
+    fpaths := []
+    flangs := []
+    flines := []
+    fcode := []
+    fcomments := []
+    fblanks := []
     misses := 0
     counted := 0
     for f in files {
@@ -223,22 +261,34 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         if only != "" && only != "__NEXT__" && lang != only {
             continue
         }
+        // Generated files aggregate under "Generated", never into
+        // language totals (filtering above still uses the real language).
+        show := lang
+        if walker.is_generated(f) {
+            show = "Generated"
+        }
         sig := cache.current_sig(f)
         hit := false
         if use_cache && sig[0] != "" {
             e := cache.lookup_entry(cached, f)
             if json.type(e) == "object" {
-                if cache.entry_str(e, "mtime") == sig[0] && cache.entry_str(e, "size") == sig[1] && cache.entry_str(e, "lang") == lang {
+                if cache.entry_str(e, "mtime") == sig[0] && cache.entry_str(e, "size") == sig[1] && cache.entry_str(e, "lang") == show {
                     li := cache.entry_int(e, "lines")
                     co := cache.entry_int(e, "code")
                     cm := cache.entry_int(e, "comments")
                     bl := cache.entry_int(e, "blanks")
                     if li >= 0 && co >= 0 && cm >= 0 && bl >= 0 {
-                        t = report.add_row(t, lang, 1, li, co, cm, bl)
+                        t = report.add_row(t, show, 1, li, co, cm, bl)
                         embval := cache.entry_json(e, "emb")
                         emb = cache.merge_emb_val(emb, embval)
                         counted = counted + 1
-                        saverows = vec.push(saverows, cache.enc_entry_arr(f, sig[0], sig[1], lang, li, co, cm, bl, cache.emb_array_joins(embval)))
+                        saverows = vec.push(saverows, cache.enc_entry_arr(f, sig[0], sig[1], show, li, co, cm, bl, cache.emb_array_joins(embval)))
+                        fpaths = vec.push(fpaths, f)
+                        flangs = vec.push(flangs, show)
+                        flines = vec.push(flines, li)
+                        fcode = vec.push(fcode, co)
+                        fcomments = vec.push(fcomments, cm)
+                        fblanks = vec.push(fblanks, bl)
                         hit = true
                     }
                 }
@@ -257,15 +307,21 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 }
                 rules := languages.resolve_markers(table, lang, customs)
                 c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
-                t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
+                t = report.add_row(t, show, 1, c.lines, c.code, c.comments, c.blanks)
                 counted = counted + 1
+                fpaths = vec.push(fpaths, f)
+                flangs = vec.push(flangs, show)
+                flines = vec.push(flines, c.lines)
+                fcode = vec.push(fcode, c.code)
+                fcomments = vec.push(fcomments, c.comments)
+                fblanks = vec.push(fblanks, c.blanks)
                 fenc := ""
-                if lang == "Markdown" {
+                if lang == "Markdown" && show == "Markdown" {
                     fenc = fence_enc(text)
                     emb = cache.merge_emb_enc(emb, fenc)
                 }
                 if use_cache {
-                    saverows = vec.push(saverows, cache.enc_entry(f, sig[0], sig[1], lang, c.lines, c.code, c.comments, c.blanks, fenc))
+                    saverows = vec.push(saverows, cache.enc_entry(f, sig[0], sig[1], show, c.lines, c.code, c.comments, c.blanks, fenc))
                 }
             },
             .err(_) => noop(),
@@ -285,9 +341,16 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         return
     }
     if out_json {
-        println(report.to_json(t))
+        if by_file {
+            println(report.to_json_full(t, fpaths, flangs, flines, fcode, fcomments, fblanks, topn))
+        } else {
+            println(report.to_json(t))
+        }
     } else {
         report.print_table_full(t, emb, th)
+        if by_file {
+            report.print_files_section(root, fpaths, flangs, flines, fcode, fcomments, fblanks, topn, th)
+        }
     }
 }
 

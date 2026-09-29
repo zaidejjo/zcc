@@ -312,6 +312,86 @@ pub func emb_base_lang(lang: str) -> str {
     lang
 }
 
+// Indices of the top-n rows by lines, descending. Partial pick-max:
+// O(n*k) scans, no full sort (n files, k shown).
+pub func top_by_lines(lines: [int], n: int) -> [int] {
+    out := []
+    if n <= 0 || len(lines) == 0 {
+        return out
+    }
+    used := []
+    for _x in lines {
+        used = vec.push(used, 0)
+    }
+    count := n
+    if count > len(lines) {
+        count = len(lines)
+    }
+    for _k in 0..count {
+        best := -1
+        for i in 0..len(lines) {
+            if used[i] == 1 {
+                continue
+            }
+            if best == -1 || lines[i] > lines[best] {
+                best = i
+            }
+        }
+        if best == -1 {
+            break
+        }
+        used[best] = 1
+        out = vec.push(out, best)
+    }
+    out
+}
+
+// Display path: trim to 44 columns with leading "..." (byte-safe: ASCII
+// dots + tail slice; paths are overwhelmingly ASCII, worst case a cut
+// multibyte char degrades one glyph, never errors).
+pub func display_path(p: str) -> str {
+    if len(p) <= 44 {
+        return p
+    }
+    "..." + p[len(p) - 41:len(p)]
+}
+
+pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int, th: Theme) {
+    idx := top_by_lines(lines, topn)
+    if len(idx) == 0 {
+        return
+    }
+    shown := len(idx)
+    println("")
+    println(" Top {shown} files by lines")
+    f0 := pad_r("File", 44)
+    f1 := pad_r("Language", 12)
+    f2 := pad_l("Lines", 10)
+    f3 := pad_l("Code", 10)
+    f4 := pad_l("Comments", 10)
+    f5 := pad_l("Blanks", 10)
+    println(maybe_bold(th, apply_color(th, th.header, "{f0}{f1}{f2}{f3}{f4}{f5}")))
+    for k in idx {
+        rel := paths[k]
+        prefix := root + "/"
+        if str.starts_with(rel, prefix) {
+            rel = rel[len(prefix):len(rel)]
+        }
+        c0 := pad_r(display_path(rel), 44)
+        c1 := pad_r(langs[k], 12)
+        c2 := pad_l(str(lines[k]), 10)
+        c3 := pad_l(str(code[k]), 10)
+        c4 := pad_l(str(comments[k]), 10)
+        c5 := pad_l(str(blanks[k]), 10)
+        line := "{c0}{c1}{c2}{c3}{c4}{c5}"
+        if is_plain_lang(th, langs[k]) {
+            println(line)
+        } else {
+            println(c0 + lang_cell(th, langs[k], c1) + "{c2}{c3}{c4}{c5}")
+        }
+    }
+}
+
 pub func print_emb_section(emb: Table, th: Theme) {
     if len(emb.langs) == 0 {
         return
@@ -366,12 +446,35 @@ pub func escape_json(s: str) -> str {
 }
 
 pub func to_json(t: Table) -> str {
+    "{" + json_tables(t) + "}"
+}
+
+// Same document plus a top-n files array (for --by-file).
+pub func to_json_full(t: Table, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int) -> str {
+    out: str = "{" + json_tables(t)
+    idx := top_by_lines(lines, topn)
+    out = out + ",\"files\":["
+    first: bool = true
+    for k in idx {
+        if !first {
+            out = out + ","
+        }
+        first = false
+        p := escape_json(paths[k])
+        lg := escape_json(langs[k])
+        out = out + "{\"path\":\"{p}\",\"language\":\"{lg}\",\"lines\":{lines[k]},\"code\":{code[k]},\"comments\":{comments[k]},\"blanks\":{blanks[k]}}"
+    }
+    out = out + "]}"
+    out
+}
+
+func json_tables(t: Table) -> str {
     t = sort_table(t)
     tot := totals(t)
     // NOTE: explicit annotations — the AOT inferencer once resolved `out`
     // as bool here (order-dependent; printed "false"). Pinned until the
     // upstream inference bug is fixed.
-    out: str = "{\"languages\":{"
+    out: str = "\"languages\":{"
     first: bool = true
     for i in 0..len(t.langs) {
         if !first {
@@ -381,6 +484,6 @@ pub func to_json(t: Table) -> str {
         lang := escape_json(t.langs[i])
         out = out + "\"{lang}\":{\"files\":{t.files[i]},\"lines\":{t.lines[i]},\"code\":{t.code[i]},\"comments\":{t.comments[i]},\"blanks\":{t.blanks[i]}}"
     }
-    out = out + "},\"total\":{\"files\":{tot[0]},\"lines\":{tot[1]},\"code\":{tot[2]},\"comments\":{tot[3]},\"blanks\":{tot[4]}}}"
+    out = out + "},\"total\":{\"files\":{tot[0]},\"lines\":{tot[1]},\"code\":{tot[2]},\"comments\":{tot[3]},\"blanks\":{tot[4]}}"
     out
 }
