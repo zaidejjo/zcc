@@ -3,9 +3,11 @@ import counter
 import languages
 import walker
 import report
+import cache
 import std.time
 import std.fs
 import std.env
+import std.json
 
 @test
 func test_split_lines() {
@@ -63,11 +65,12 @@ func test_big_project_ms() {
     }
     files := walker.walk_files(base, [], true, false)
     table := languages.load_lang_table()
+    em := languages.build_ext_map(table)
     t := report.new_table()
     counted := 0
     total_lines := 0
     for f in files {
-        lang := languages.resolve_lang_with(table, f)
+        lang := languages.resolve_fast(em, f)
         if lang == "" {
             continue
         }
@@ -128,6 +131,115 @@ func test_inline_block_then_code() {
     c := counter.count_content(src, "Rust")
     assert_eq(c.comments, 1)
     assert_eq(c.code, 1)
+}
+
+@test
+func test_cache_roundtrip() {
+    base := fs.join(env.temp_dir(), "zcc_cache_test")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+    match fs.mkdir_all(fs.join(base, "src")) {
+        .ok(_) => walker.noop(),
+        .err(e) => fail("mkdir: {e}"),
+    }
+    path := fs.join(fs.join(base, "src"), "a.rs")
+    match fs.write(path, "// hi\nfn f() {}\n") {
+        .ok(_) => walker.noop(),
+        .err(e) => fail("write: {e}"),
+    }
+    sig := cache.current_sig(path)
+    assert(sig[0] != "")
+    assert(sig[1] != "")
+    emb := "└ Rust\x1f1\x1f2\x1f1\x1f0\x1f1"
+    rows := [cache.enc_entry(path, sig[0], sig[1], "Rust", 2, 1, 1, 0, emb)]
+    cache.save_cache(base, rows)
+    files := cache.load_files_obj(base)
+    assert(json.type(files) == "object")
+    e := cache.lookup_entry(files, path)
+    assert(json.type(e) == "object")
+    assert_eq(cache.entry_str(e, "mtime"), sig[0])
+    assert_eq(cache.entry_str(e, "size"), sig[1])
+    assert_eq(cache.entry_str(e, "lang"), "Rust")
+    assert_eq(cache.entry_int(e, "lines"), 2)
+    assert_eq(cache.entry_int(e, "code"), 1)
+    assert_eq(cache.entry_str(e, "missing"), "")
+    assert_eq(cache.entry_int(e, "nope"), -1)
+    embval := cache.entry_json(e, "emb")
+    assert(json.type(embval) == "array")
+    assert_eq(cache.emb_array_joins(embval), cache.emb_array_text(emb))
+    et := cache.merge_emb_val(report.new_table(), embval)
+    assert_eq(len(et.langs), 1)
+    assert_eq(et.langs[0], "└ Rust")
+    assert_eq(et.files[0], 1)
+    assert_eq(et.lines[0], 2)
+    assert_eq(et.code[0], 1)
+    assert_eq(et.comments[0], 0)
+    assert_eq(et.blanks[0], 1)
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+}
+
+@test
+func test_cache_invalidate_on_edit() {
+    base := fs.join(env.temp_dir(), "zcc_cache_inv")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+    match fs.mkdir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(e) => fail("mkdir: {e}"),
+    }
+    path := fs.join(base, "b.py")
+    match fs.write(path, "# one\n") {
+        .ok(_) => walker.noop(),
+        .err(e) => fail("write: {e}"),
+    }
+    sig1 := cache.current_sig(path)
+    rows := [cache.enc_entry(path, sig1[0], sig1[1], "Python", 1, 0, 1, 0, "")]
+    cache.save_cache(base, rows)
+    match fs.write(path, "# one\n# two\nx = 1\n") {
+        .ok(_) => walker.noop(),
+        .err(e) => fail("rewrite: {e}"),
+    }
+    sig2 := cache.current_sig(path)
+    files := cache.load_files_obj(base)
+    e := cache.lookup_entry(files, path)
+    assert(json.type(e) == "object")
+    stale := cache.entry_str(e, "mtime") == sig2[0] && cache.entry_str(e, "size") == sig2[1]
+    assert(!stale)
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+}
+
+@test
+func test_cache_missing_is_null() {
+    files := cache.load_files_obj("/tmp/zcc_no_such_root_zzz")
+    assert(json.type(files) == "null")
+    e := cache.lookup_entry(files, "whatever.rs")
+    assert(json.type(e) == "null")
+}
+
+@test
+func test_match_pat_parity() {
+    // compile_pats + match_pat must agree with match_one/is_ignored_by
+    // on every (pattern, path) pair, including negations and empties.
+    pats := ["target/", "src/bin/", "*.log", "build*", "**/foo", "a/**", "/abs", "plain", "!keep", "!*.tmp", "", "x"]
+    rels := ["target/x", "src/bin/z", "a.log", "build9", "d/foo/f", "a/b", "abs/y", "plain", "z/plain/q", "keep", "x/keep/y", "k.tmp", "x", "other"]
+    cps := walker.compile_pats(pats)
+    for r in rels {
+        assert_eq(walker.is_ignored_by(r, false, pats), walker.is_ignored_compiled(cps, r, fs.basename(r)))
+    }
 }
 
 @test

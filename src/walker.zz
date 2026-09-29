@@ -166,23 +166,202 @@ pub func match_one(pattern: str, rel: str, isdir: bool) -> bool {
 }
 
 pub func is_ignored_by(rel: str, isdir: bool, pats: [str]) -> bool {
-    if isdir {
-        noop()
-    }
-    ignored := false
-    for pat in pats {
+    cps := compile_pats(pats)
+    is_ignored_compiled(cps, rel, fs.basename(rel))
+}
+
+// ── Precompiled patterns ─────────────────────────────────────────────────
+// match_one re-splits/replaces the PATTERN on every file (30 pats × 60k
+// files). compile_pats derives each pattern's kind + static parts ONCE;
+// match_pat then costs only a few native str ops per (pattern, path).
+// kinds: "empty" | "dir" | "star2" | "star" | "slash" | "plain",
+// negated kinds carry a "!" prefix ("!dir", ...). Parallel [str] arrays
+// only (no new types). Semantics mirror match_one branch-for-branch.
+pub func compile_pats(pats: [str]) -> [[str]] {
+    kinds := []
+    pa := []
+    pb := []
+    for pat0 in pats {
+        pat := pat0
+        neg := ""
         if str.starts_with(pat, "!") {
-            bang := str.split(pat, "!")
-            inner := ""
-            if len(bang) > 1 {
-                inner = bang[1]
+            neg = "!"
+            parts := str.split(pat, "!")
+            if len(parts) > 1 {
+                pat = parts[1]
+            } else {
+                pat = ""
             }
-            if inner != "" && match_one(inner, rel, isdir) {
+        }
+        if pat == "" {
+            kinds = vec.push(kinds, neg + "empty")
+            pa = vec.push(pa, "")
+            pb = vec.push(pb, "")
+            continue
+        }
+        if str.ends_with(pat, "/") {
+            full := str.split(pat, "/")
+            base := ""
+            for s in full {
+                if s == "" {
+                    continue
+                }
+                if base == "" {
+                    base = s
+                } else {
+                    base = base + "/" + s
+                }
+            }
+            kinds = vec.push(kinds, neg + "dir")
+            pa = vec.push(pa, base)
+            pb = vec.push(pb, "")
+            continue
+        }
+        if str.contains(pat, "**") {
+            parts := str.split(pat, "**")
+            pre := str.trim(parts[0])
+            post := ""
+            if len(parts) > 1 {
+                post = str.trim(parts[1])
+            }
+            pre = str.trim(pre)
+            post = str.trim(post)
+            if pre != "" {
+                pre = str.replace(pre, "/", "")
+                pre = str.replace(pre, "*", "")
+            }
+            if post != "" {
+                post = str.replace(post, "/", "")
+                post = str.replace(post, "*", "")
+            }
+            kinds = vec.push(kinds, neg + "star2")
+            pa = vec.push(pa, pre)
+            pb = vec.push(pb, post)
+            continue
+        }
+        if str.contains(pat, "*") {
+            clean := str.replace(pat, "*", "")
+            clean = str.replace(clean, "/", "")
+            kinds = vec.push(kinds, neg + "star")
+            pa = vec.push(pa, clean)
+            pb = vec.push(pb, "")
+            continue
+        }
+        if str.starts_with(pat, "/") {
+            slash_parts := str.split(pat, "/")
+            inner := pat
+            if len(slash_parts) > 1 {
+                inner = slash_parts[1]
+            }
+            kinds = vec.push(kinds, neg + "slash")
+            pa = vec.push(pa, inner)
+            pb = vec.push(pb, "")
+            continue
+        }
+        kinds = vec.push(kinds, neg + "plain")
+        pa = vec.push(pa, pat)
+        pb = vec.push(pb, "")
+    }
+    [kinds, pa, pb]
+}
+
+pub func match_pat(kind: str, a: str, b: str, rel: str, base: str) -> bool {
+    if kind == "empty" {
+        return false
+    }
+    if kind == "dir" {
+        if a == "" {
+            return false
+        }
+        if rel == a {
+            return true
+        }
+        if str.starts_with(rel, a + "/") {
+            return true
+        }
+        if str.contains(rel, "/" + a + "/") {
+            return true
+        }
+        if str.ends_with(rel, "/" + a) {
+            return true
+        }
+        return false
+    }
+    if kind == "star2" {
+        if a != "" && b != "" {
+            return str.contains(rel, a) && str.contains(rel, b)
+        }
+        if a != "" {
+            return str.contains(rel, a)
+        }
+        if b != "" {
+            return str.contains(rel, b)
+        }
+        return true
+    }
+    if kind == "star" {
+        if a == "" {
+            return true
+        }
+        return str.contains(base, a)
+    }
+    if kind == "slash" {
+        if rel == a {
+            return true
+        }
+        if str.starts_with(rel, a + "/") {
+            return true
+        }
+        return false
+    }
+    // plain
+    if a == rel {
+        return true
+    }
+    if a == base {
+        return true
+    }
+    if str.contains(rel, a) {
+        if rel == a {
+            return true
+        }
+        if str.starts_with(rel, a + "/") {
+            return true
+        }
+        if str.ends_with(rel, "/" + a) {
+            return true
+        }
+        if str.contains(rel, "/" + a + "/") {
+            return true
+        }
+        return false
+    }
+    false
+}
+
+// Strip one leading "!" marker kind (no multi-char split: AOT toolchain).
+pub func kind_split_rest(kind: str) -> str {
+    if str.starts_with(kind, "!") && len(kind) > 1 {
+        return kind[1:len(kind)]
+    }
+    kind
+}
+
+pub func is_ignored_compiled(cps: [[str]], rel: str, base: str) -> bool {
+    kinds := cps[0]
+    pa := cps[1]
+    pb := cps[2]
+    ignored := false
+    for i in 0..len(kinds) {
+        kind := kinds[i]
+        if str.starts_with(kind, "!") {
+            inner_kind := kind_split_rest(kind)
+            if inner_kind != "empty" && match_pat(kind, pa[i], pb[i], rel, base) {
                 ignored = false
             }
             continue
         }
-        if match_one(pat, rel, isdir) {
+        if match_pat(kind, pa[i], pb[i], rel, base) {
             ignored = true
         }
     }
@@ -234,71 +413,111 @@ pub func rel_path(root: str, full: str) -> str {
 }
 
 // Walk + filter. Returns file paths only.
+//
+// Pruning recursive descent (not walk_dir + post-filter): walk_dir
+// enumerates + sorts EVERYTHING including target/ and .git (57k of 62k
+// paths on zz_lang). We list one level at a time and never descend into
+// skipped dirs, so junk paths cost one readdir entry instead of a stat +
+// rel splits + 27-pattern match each. Output order stays globally sorted
+// (read_dir is sorted; DFS pre-order over sorted siblings is sorted).
 pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bool) -> [str] {
-    out := []
     base := root
     if base == "" {
         base = "."
     }
-    // Normalize trailing slashes so rel_path prefixing holds.
+    // Normalize trailing slashes so child joins hold.
     while len(base) > 1 && str.ends_with(base, "/") {
         base = base[:len(base) - 1]
     }
-    match fs.walk_dir(base) {
-        .ok(paths) => {
-            for p in paths {
-                if !fs.is_file(p) {
+    cps := compile_pats(pats)
+    has_neg := false
+    for k in cps[0] {
+        if str.starts_with(k, "!") {
+            has_neg = true
+        }
+    }
+    rbase := ""
+    if base == "." {
+        rbase = "."
+    }
+    walk_rec(base, rbase, cps, use_ignore, include_hidden, has_neg, 0)
+}
+
+// Depth cap: symlink-dir cycles would recurse forever (is_dir follows
+// links); 64 levels is plenty for real trees.
+pub func walk_rec(dir: str, rdir: str, cps: [[str]], use_ignore: bool, include_hidden: bool, has_neg: bool, depth: int) -> [str] {
+    out := []
+    if depth > 64 {
+        return out
+    }
+    match fs.read_dir(dir) {
+        .ok(names) => {
+            for name in names {
+                if !include_hidden && str.starts_with(name, ".") {
                     continue
                 }
-                rel := rel_path(base, p)
-                b := fs.basename(p)
-                // hidden?
-                if !include_hidden {
-                    if str.starts_with(b, ".") {
-                        continue
-                    }
-                    if str.starts_with(rel, ".") {
-                        continue
-                    }
-                    if str.contains(rel, "/.") {
-                        continue
-                    }
+                full := fs.join(dir, name)
+                crel := name
+                if rdir != "" && rdir != "." {
+                    crel = rdir + "/" + name
                 }
-                // default skips on any segment
-                skip := false
-                segs := str.split(rel, "/")
-                for s in segs {
-                    if default_skip(s) {
-                        skip = true
+                if fs.is_dir(full) {
+                    if use_ignore && default_skip(name) {
+                        continue
                     }
-                }
-                // also check full rel against default dir names
-                if skip && use_ignore {
+                    if !use_ignore && (name == ".git" || name == ".hg" || name == ".svn") {
+                        continue
+                    }
+                    if use_ignore && !has_neg && dir_pruned(cps, crel, name) {
+                        continue
+                    }
+                    sub := walk_rec(full, crel, cps, use_ignore, include_hidden, has_neg, depth + 1)
+                    for s in sub {
+                        out = vec.push(out, s)
+                    }
                     continue
                 }
-                if !use_ignore && skip {
-                    // --no-ignore still skips .git (safety) but keeps target etc?
-                    // Keep .git skipped always; allow the rest.
-                    only_git := false
-                    for s in segs {
-                        if s == ".git" || s == ".hg" || s == ".svn" {
-                            only_git = true
-                        }
-                    }
-                    if only_git {
-                        continue
-                    }
-                }
-                if use_ignore && is_ignored_by(rel, false, pats) {
+                if use_ignore && default_skip(name) {
                     continue
                 }
-                out = vec.push(out, p)
+                if !use_ignore && (name == ".git" || name == ".hg" || name == ".svn") {
+                    continue
+                }
+                if use_ignore && is_ignored_compiled(cps, crel, name) {
+                    continue
+                }
+                out = vec.push(out, full)
             }
             noop()
         },
         .err(_) => noop(),
     }
     out
+}
+
+// True when dir (rel crel, basename name) can be pruned: some pattern
+// matches it AND provably matches every file beneath it. Child-closed
+// classes: dir-patterns ("target/"), "**" patterns, and *-free patterns.
+// Single-"*" patterns are NOT child-closed ("x.log" matches "*.log"
+// while "x.log/y" doesn't), so they never prune. With negations present
+// nothing prunes (a later "!" could re-include children).
+pub func dir_pruned(cps: [[str]], crel: str, name: str) -> bool {
+    kinds := cps[0]
+    pa := cps[1]
+    pb := cps[2]
+    for i in 0..len(kinds) {
+        kind := kinds[i]
+        if kind == "star" {
+            continue
+        }
+        if kind == "empty" {
+            continue
+        }
+        if match_pat(kind, pa[i], pb[i], crel, name) {
+            return true
+        }
+    }
+    false
 }
 
 // NUL check on already-read text: lets callers read each file ONCE

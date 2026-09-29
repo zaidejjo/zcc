@@ -4,6 +4,7 @@
 // Runtime lookup tries user config first, falls back to builtins below.
 import std.fs
 import std.str
+import std.vec
 import std.json
 import std.env
 
@@ -547,6 +548,86 @@ pub func resolve_lang_with(root: json, path: str) -> str {
     custom := table_lookup(root, path)
     if custom != "" {
         return custom
+    }
+    detect_lang(path)
+}
+
+// ── Flat ext map: built ONCE per run, O(1)-ish lookup per file ──────────────
+// Snapshot-safe plain data (structs of [str]), so worker tasks can capture
+// it, unlike the opaque json table handle.
+pub struct ExtMap { exts: [str], langs: [str], files: [str], filelangs: [str] }
+
+pub func build_ext_map(root: json) -> ExtMap {
+    m := ExtMap{ exts: [], langs: [], files: [], filelangs: [] }
+    if json.type(root) != "object" {
+        return m
+    }
+    names := json.keys(root)
+    for name in names {
+        match json.get(root, name) {
+            .ok(langobj) => {
+                if json.has(langobj, "extensions") {
+                    match json.get(langobj, "extensions") {
+                        .ok(arr) => {
+                            n := json.len(arr)
+                            for i in 0..n {
+                                match json.get(arr, str(i)) {
+                                    .ok(v) => {
+                                        if json.type(v) == "string" {
+                                            m.exts = vec.push(m.exts, str.to_lower(json.as_str(v)))
+                                            m.langs = vec.push(m.langs, name)
+                                        }
+                                        ""
+                                    },
+                                    .err(_) => "",
+                                }
+                            }
+                        },
+                        .err(_) => noop(),
+                    }
+                }
+                if json.has(langobj, "files") {
+                    match json.get(langobj, "files") {
+                        .ok(arr) => {
+                            n := json.len(arr)
+                            for i in 0..n {
+                                match json.get(arr, str(i)) {
+                                    .ok(v) => {
+                                        if json.type(v) == "string" {
+                                            m.files = vec.push(m.files, json.as_str(v))
+                                            m.filelangs = vec.push(m.filelangs, name)
+                                        }
+                                        ""
+                                    },
+                                    .err(_) => "",
+                                }
+                            }
+                        },
+                        .err(_) => noop(),
+                    }
+                }
+            },
+            .err(_) => noop(),
+        }
+    }
+    m
+}
+
+pub func resolve_fast(m: ExtMap, path: str) -> str {
+    base := fs.basename(path)
+    for i in 0..len(m.files) {
+        if m.files[i] == base {
+            return m.filelangs[i]
+        }
+    }
+    ext := str.to_lower(fs.extension(path))
+    if ext == "" {
+        return detect_lang(path)
+    }
+    for i in 0..len(m.exts) {
+        if m.exts[i] == ext {
+            return m.langs[i]
+        }
     }
     detect_lang(path)
 }

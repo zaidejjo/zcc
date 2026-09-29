@@ -1,12 +1,17 @@
 // zcc — blazing-fast code counter (tokei clone) in ZZ.
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
+// NOTE: `zz build` cache-keys only the entry file — after editing any other
+// module, change this file's bytes too (or the old binary is re-served).
+// (Upstream cache-invalidation bug; entry rev 5.)
 import std.fs
 import std.str
 import std.vec
+import std.json
 import counter
 import languages
 import walker
 import report
+import cache
 
 pub func VERSION() -> str {
     "0.1.0"
@@ -28,6 +33,7 @@ func print_help() {
     println("    --output json       machine-readable JSON to stdout")
     println("    --hidden            include hidden files/dirs")
     println("    --no-ignore         skip .gitignore rules (still skips .git)")
+    println("    --no-cache          skip the count cache (always recount)")
     println("    --only LANG         count only this language (e.g. Rust)")
     println("    --help, -h          show this help")
     println("    --version, -V       show version")
@@ -48,6 +54,7 @@ func main(cli_args: [str]) {
     out_json := false
     include_hidden := false
     use_ignore := true
+    use_cache := true
     only := ""
     show_help := false
     show_ver := false
@@ -69,6 +76,10 @@ func main(cli_args: [str]) {
         }
         if a == "--no-ignore" {
             use_ignore = false
+            continue
+        }
+        if a == "--no-cache" {
+            use_cache = false
             continue
         }
         if a == "--output=json" || a == "--output json" {
@@ -136,12 +147,13 @@ func main(cli_args: [str]) {
         println("zcc: path not found: {root}")
         return
     }
-    run_dir(root, only, out_json, include_hidden, use_ignore)
+    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache)
 }
 
 func run_single(path: str, only: str, out_json: bool) {
     table := languages.load_lang_table()
-    lang := languages.resolve_lang_with(table, path)
+    em := languages.build_ext_map(table)
+    lang := languages.resolve_fast(em, path)
     if lang == "" {
         println("zcc: unknown language for {path}")
         return
@@ -169,31 +181,60 @@ func run_single(path: str, only: str, out_json: bool) {
     }
 }
 
-func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool) {
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool) {
     pats := walker.load_patterns(root)
     files := walker.walk_files(root, pats, use_ignore, include_hidden)
     table := languages.load_lang_table()
+    em := languages.build_ext_map(table)
+    cached := json.null()
+    cached_n := 0
+    if use_cache {
+        cached = cache.load_files_obj(root)
+        if json.type(cached) == "object" {
+            cached_n = json.len(cached)
+        }
+    }
     t := report.new_table()
-    // markdown embedded accumulators
-    emb_names := []
-    emb_files := []
-    emb_lines := []
-    emb_code := []
-    emb_comments := []
-    emb_blanks := []
+    emb := report.new_table()
+    saverows := []
+    misses := 0
     counted := 0
     for f in files {
         // Cheap string-only checks first: zero IO for unknown/filtered-out.
-        lang := languages.resolve_lang_with(table, f)
+        lang := languages.resolve_fast(em, f)
         if lang == "" {
             continue
         }
         if only != "" && only != "__NEXT__" && lang != only {
             continue
         }
+        sig := cache.current_sig(f)
+        hit := false
+        if use_cache && sig[0] != "" {
+            e := cache.lookup_entry(cached, f)
+            if json.type(e) == "object" {
+                if cache.entry_str(e, "mtime") == sig[0] && cache.entry_str(e, "size") == sig[1] && cache.entry_str(e, "lang") == lang {
+                    li := cache.entry_int(e, "lines")
+                    co := cache.entry_int(e, "code")
+                    cm := cache.entry_int(e, "comments")
+                    bl := cache.entry_int(e, "blanks")
+                    if li >= 0 && co >= 0 && cm >= 0 && bl >= 0 {
+                        t = report.add_row(t, lang, 1, li, co, cm, bl)
+                        embval := cache.entry_json(e, "emb")
+                        emb = cache.merge_emb_val(emb, embval)
+                        counted = counted + 1
+                        saverows = vec.push(saverows, cache.enc_entry_arr(f, sig[0], sig[1], lang, li, co, cm, bl, cache.emb_array_joins(embval)))
+                        hit = true
+                    }
+                }
+            }
+        }
+        if hit {
+            continue
+        }
+        misses = misses + 1
         // Single read per file: strict UTF-8 read rejects non-UTF8
-        // binaries; has_nul catches the rest. (Was: full read_bytes
-        // scan + full read_to_string = 2x IO per file.)
+        // binaries; has_nul catches the rest.
         match fs.read_to_string(f) {
             .ok(text) => {
                 if walker.has_nul(text) {
@@ -202,46 +243,26 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 c := counter.count_content(text, lang)
                 t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
                 counted = counted + 1
-                // markdown fences -> embedded langs
+                fenc := ""
                 if lang == "Markdown" {
-                    fenced := counter.markdown_fences(text)
-                    if len(fenced) == 2 {
-                        lang_part := fenced[0]
-                        body_part := fenced[1]
-                        if lang_part != "" {
-                            llist := str.split(lang_part, "\x01")
-                            blist := str.split(body_part, "\x02")
-                            for i in 0..len(llist) {
-                                tag := llist[i]
-                                if tag == "" {
-                                    continue
-                                }
-                                body := ""
-                                if i < len(blist) {
-                                    body = blist[i]
-                                }
-                                // normalize display names
-                                disp := tag
-                                if disp == "BASH" {
-                                    disp = "BASH"
-                                }
-                                ec := counter.count_content(body, disp)
-                                // only keep known langs
-                                if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" {
-                                    emb_names = vec.push(emb_names, "└ " + disp)
-                                    emb_files = vec.push(emb_files, 1)
-                                    emb_lines = vec.push(emb_lines, ec.lines)
-                                    emb_code = vec.push(emb_code, ec.code)
-                                    emb_comments = vec.push(emb_comments, ec.comments)
-                                    emb_blanks = vec.push(emb_blanks, ec.blanks)
-                                }
-                            }
-                        }
-                    }
+                    fenc = fence_enc(text)
+                    emb = cache.merge_emb_enc(emb, fenc)
+                }
+                if use_cache {
+                    saverows = vec.push(saverows, cache.enc_entry(f, sig[0], sig[1], lang, c.lines, c.code, c.comments, c.blanks, fenc))
                 }
             },
             .err(_) => noop(),
         }
+    }
+    // Clean warm runs skip the rewrite: rows round-tripped untouched,
+    // so the file on disk is already identical (saves join + write).
+    // Filtered views (e.g. --only/--hidden) never save: the cache keys by
+    // root only, and a partial row set would poison full runs. They still
+    // read (misses count fresh, results stay correct).
+    can_save := use_cache && only == "" && !include_hidden && use_ignore
+    if can_save && (misses > 0 || len(saverows) != cached_n) {
+        cache.save_cache(root, saverows)
     }
     if counted == 0 {
         println("zcc: no countable files under {root}")
@@ -253,8 +274,58 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         report.print_table(t)
         // markdown breakdown like tokei screenshot
         idx := report.find_lang(t, "Markdown")
-        if idx >= 0 && len(emb_names) > 0 {
+        if idx >= 0 && len(emb.langs) > 0 {
+            emb_names := []
+            emb_files := []
+            emb_lines := []
+            emb_code := []
+            emb_comments := []
+            emb_blanks := []
+            for i in 0..len(emb.langs) {
+                emb_names = vec.push(emb_names, emb.langs[i])
+                emb_files = vec.push(emb_files, emb.files[i])
+                emb_lines = vec.push(emb_lines, emb.lines[i])
+                emb_code = vec.push(emb_code, emb.code[i])
+                emb_comments = vec.push(emb_comments, emb.comments[i])
+                emb_blanks = vec.push(emb_blanks, emb.blanks[i])
+            }
             report.print_markdown_breakdown(emb_names, emb_files, emb_lines, emb_code, emb_comments, emb_blanks)
         }
     }
+}
+
+// Extract fenced-code rows from one Markdown body as a raw emb
+// encoding (rows joined by \x1e, "" when none).
+pub func fence_enc(text: str) -> str {
+    rows := []
+    fenced := counter.markdown_fences(text)
+    if len(fenced) != 2 {
+        return ""
+    }
+    lang_part := fenced[0]
+    body_part := fenced[1]
+    if lang_part == "" {
+        return ""
+    }
+    llist := str.split(lang_part, "\x01")
+    blist := str.split(body_part, "\x02")
+    for i in 0..len(llist) {
+        tag := llist[i]
+        if tag == "" {
+            continue
+        }
+        body := ""
+        if i < len(blist) {
+            body = blist[i]
+        }
+        disp := tag
+        if disp == "BASH" {
+            disp = "BASH"
+        }
+        ec := counter.count_content(body, disp)
+        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" {
+            rows = vec.push(rows, "└ {disp}\x1f1\x1f{ec.lines}\x1f{ec.code}\x1f{ec.comments}\x1f{ec.blanks}")
+        }
+    }
+    str.join(rows, "\x1e")
 }

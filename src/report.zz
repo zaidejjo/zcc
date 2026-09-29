@@ -183,8 +183,11 @@ pub func escape_json(s: str) -> str {
 pub func to_json(t: Table) -> str {
     t = sort_table(t)
     tot := totals(t)
-    out := "{\"languages\":{"
-    first := true
+    // NOTE: explicit annotations — the AOT inferencer once resolved `out`
+    // as bool here (order-dependent; printed "false"). Pinned until the
+    // upstream inference bug is fixed.
+    out: str = "{\"languages\":{"
+    first: bool = true
     for i in 0..len(t.langs) {
         if !first {
             out = out + ","

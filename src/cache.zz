@@ -1,0 +1,306 @@
+// zcc/src/cache.zz — mtime+size count cache for instant warm runs.
+//
+// Single JSON file per scanned root:
+//   <cache_dir>/<slug(root)>.json
+//   {"root": "<root>", "files": {"<path>": {"mtime": "..", "size": "..",
+//    "lang": "..", "lines": "..", "code": "..", "comments": "..",
+//    "blanks": "..", "emb": [{lang/files/lines/... objects}]}}}
+//
+// All scalar entry fields are strings (never bare numbers): corrupted
+// values degrade to lookup misses via `int() ?? -1`, never hard errors.
+// emb travels as an array of flat string-valued objects so no control
+// chars ever reach the JSON text (the parser mangles \uXXXX).
+// The stored root is validated on load, so slug collisions only ever
+// cost a miss, never wrong data.
+import std.fs
+import std.str
+import std.vec
+import std.json
+import std.env
+import report
+
+func noop() {
+}
+
+pub func cache_dir() -> str {
+    match env.home_dir() {
+        .some(h) => {
+            if env.os() == "windows" {
+                match env.get("LOCALAPPDATA") {
+                    .some(a) => a + "\\zcc-cache",
+                    .none => h + "\\.cache\\zcc",
+                }
+            } else {
+                h + "/.cache/zcc"
+            }
+        },
+        .none => ".zcc-cache",
+    }
+}
+
+pub func slugify(root: str) -> str {
+    s := str.replace(root, "/", "_")
+    s = str.replace(s, "\\", "_")
+    s = str.replace(s, ":", "_")
+    if s == "" {
+        s = "root"
+    }
+    s
+}
+
+pub func cache_file(root: str) -> str {
+    fs.join(cache_dir(), slugify(root) + ".json")
+}
+
+// JSON-safe escaping (standard escapes only: the parser roundtrips
+// \\, \", \n, \r, \t, \/ but mangles \uXXXX, so control chars never
+// reach the JSON text — emb rows travel as objects, not strings).
+pub func esc(s: str) -> str {
+    e := str.replace(s, "\\", "\\\\")
+    e = str.replace(e, "\"", "\\\"")
+    e = str.replace(e, "\n", "\\n")
+    e = str.replace(e, "\r", "\\r")
+    e = str.replace(e, "\t", "\\t")
+    e
+}
+
+pub func unesc(s: str) -> str {
+    e := str.replace(s, "\\t", "\t")
+    e = str.replace(e, "\\r", "\r")
+    e = str.replace(e, "\\n", "\n")
+    e = str.replace(e, "\\\"", "\"")
+    e = str.replace(e, "\\\\", "\\")
+    e
+}
+
+// Load the files object for root, or json.null() on any failure.
+pub func load_files_obj(root: str) -> json {
+    cfg := cache_file(root)
+    if !fs.exists(cfg) {
+        return json.null()
+    }
+    match fs.read_to_string(cfg) {
+        .ok(text) => {
+            match json.parse(text) {
+                .ok(j) => {
+                    if json.type(j) != "object" {
+                        return json.null()
+                    }
+                    if !json.has(j, "root") {
+                        return json.null()
+                    }
+                    match json.get(j, "root") {
+                        .ok(rv) => {
+                            if json.type(rv) != "string" {
+                                return json.null()
+                            }
+                            if json.as_str(rv) != root {
+                                return json.null()
+                            }
+                            if !json.has(j, "files") {
+                                return json.null()
+                            }
+                            match json.get(j, "files") {
+                                .ok(f) => {
+                                    if json.type(f) != "object" {
+                                        return json.null()
+                                    }
+                                    f
+                                },
+                                .err(_) => json.null(),
+                            }
+                        },
+                        .err(_) => json.null(),
+                    }
+                },
+                .err(_) => json.null(),
+            }
+        },
+        .err(_) => json.null(),
+    }
+}
+
+pub func lookup_entry(files: json, path: str) -> json {
+    if json.type(files) != "object" {
+        return json.null()
+    }
+    if !json.has(files, path) {
+        return json.null()
+    }
+    match json.get(files, path) {
+        .ok(e) => {
+            if json.type(e) != "object" {
+                return json.null()
+            }
+            e
+        },
+        .err(_) => json.null(),
+    }
+}
+
+pub func entry_str(e: json, key: str) -> str {
+    if !json.has(e, key) {
+        return ""
+    }
+    match json.get(e, key) {
+        .ok(v) => {
+            if json.type(v) != "string" {
+                return ""
+            }
+            json.as_str(v)
+        },
+        .err(_) => "",
+    }
+}
+
+pub func entry_int(e: json, key: str) -> int {
+    int(entry_str(e, key)) ?? -1
+}
+
+pub func entry_json(e: json, key: str) -> json {
+    if !json.has(e, key) {
+        return json.null()
+    }
+    match json.get(e, key) {
+        .ok(v) => v,
+        .err(_) => json.null(),
+    }
+}
+
+// Current [mtime, size] signature strings (["",""] when unstated).
+pub func current_sig(path: str) -> [str] {
+    match fs.stat(path) {
+        .ok(m) => [m["modified_ms"], m["size"]],
+        .err(_) => ["", ""],
+    }
+}
+
+// One files-map row (values raw; esc applied here). emb travels as
+// raw text and is converted by emb_array_text below.
+pub func enc_entry(path: str, mtime: str, size: str, lang: str, lines: int, code: int, comments: int, blanks: int, emb: str) -> str {
+    enc_entry_arr(path, mtime, size, lang, lines, code, comments, blanks, emb_array_text(emb))
+}
+
+// Same row but with prebuilt emb array text (for carried cache hits).
+// Empty text defaults to [] so the row stays valid JSON.
+pub func enc_entry_arr(path: str, mtime: str, size: str, lang: str, lines: int, code: int, comments: int, blanks: int, emb_text: str) -> str {
+    arr := emb_text
+    if arr == "" {
+        arr = "[]"
+    }
+    p := esc(path)
+    lg := esc(lang)
+    "\"{p}\": {\"mtime\": \"{mtime}\", \"size\": \"{size}\", \"lang\": \"{lg}\", \"lines\": \"{lines}\", \"code\": \"{code}\", \"comments\": \"{comments}\", \"blanks\": \"{blanks}\", \"emb\": {arr}}"
+}
+
+// Raw emb encoding ("lang\x1f..." rows joined by \x1e) to a JSON array
+// of flat string-valued objects. No control chars reach the text.
+pub func emb_array_text(raw: str) -> str {
+    if raw == "" {
+        return "[]"
+    }
+    parts := []
+    rows := str.split(raw, "\x1e")
+    for row in rows {
+        f := str.split(row, "\x1f")
+        if len(f) != 6 {
+            continue
+        }
+        lg := esc(f[0])
+        fi := f[1]
+        li := f[2]
+        co := f[3]
+        cm := f[4]
+        bl := f[5]
+        parts = vec.push(parts, "{\"lang\": \"{lg}\", \"files\": \"{fi}\", \"lines\": \"{li}\", \"code\": \"{co}\", \"comments\": \"{cm}\", \"blanks\": \"{bl}\"}")
+    }
+    "[" + str.join(parts, ", ") + "]"
+}
+
+// Merge one emb array value into the emb table. Anything malformed is
+// skipped row by row (never a hard error: cache must degrade to miss).
+pub func merge_emb_val(emb: report.Table, val: json) -> report.Table {
+    if json.type(val) != "array" {
+        return emb
+    }
+    n := json.len(val)
+    for i in 0..n {
+        match json.get(val, str(i)) {
+            .ok(o) => {
+                if json.type(o) != "object" {
+                    continue
+                }
+                lang := unesc(entry_str(o, "lang"))
+                fi := int(entry_str(o, "files")) ?? -1
+                li := int(entry_str(o, "lines")) ?? -1
+                co := int(entry_str(o, "code")) ?? -1
+                cm := int(entry_str(o, "comments")) ?? -1
+                bl := int(entry_str(o, "blanks")) ?? -1
+                if lang == "" || fi < 0 || li < 0 || co < 0 || cm < 0 || bl < 0 {
+                    continue
+                }
+                emb = report.add_row(emb, lang, fi, li, co, cm, bl)
+            },
+            .err(_) => noop(),
+        }
+    }
+    emb
+}
+
+// Re-emit a stored emb array value as array text (for carried hits).
+pub func emb_array_joins(val: json) -> str {
+    if json.type(val) != "array" {
+        return "[]"
+    }
+    parts := []
+    n := json.len(val)
+    for i in 0..n {
+        match json.get(val, str(i)) {
+            .ok(o) => {
+                if json.type(o) != "object" {
+                    continue
+                }
+                lg := entry_str(o, "lang")
+                fi := entry_str(o, "files")
+                li := entry_str(o, "lines")
+                co := entry_str(o, "code")
+                cm := entry_str(o, "comments")
+                bl := entry_str(o, "blanks")
+                esc_lang := esc(unesc(lg))
+                parts = vec.push(parts, "{\"lang\": \"{esc_lang}\", \"files\": \"{fi}\", \"lines\": \"{li}\", \"code\": \"{co}\", \"comments\": \"{cm}\", \"blanks\": \"{bl}\"}")
+            },
+            .err(_) => noop(),
+        }
+    }
+    "[" + str.join(parts, ", ") + "]"
+}
+
+pub func save_cache(root: str, rows: [str]) {
+    match fs.mkdir_all(cache_dir()) {
+        .ok(_) => noop(),
+        .err(_) => noop(),
+    }
+    body := str.join(rows, ",\n")
+    text := "{\"root\": \"{esc(root)}\", \"files\": {\n{body}\n}}"
+    match fs.write(cache_file(root), text) {
+        .ok(_) => noop(),
+        .err(_) => noop(),
+    }
+}
+
+// Merge one raw emb encoding ("lang\x1f..." rows joined by \x1e)
+// into the emb table.
+pub func merge_emb_enc(emb: report.Table, enc: str) -> report.Table {
+    if enc == "" {
+        return emb
+    }
+    rows := str.split(enc, "\x1e")
+    for row in rows {
+        f := str.split(row, "\x1f")
+        if len(f) != 6 {
+            continue
+        }
+        emb = report.add_row(emb, f[0], int(f[1]) ?? 0, int(f[2]) ?? 0, int(f[3]) ?? 0, int(f[4]) ?? 0, int(f[5]) ?? 0)
+    }
+    emb
+}
