@@ -6,6 +6,26 @@ import std.colors
 pub func noop() {
 }
 
+// Local cell padding. NOTE: stdlib pad_right miscompiles in large AOT
+// programs (`needed` inferred bool → no padding; toolchain bug), so pad
+// here via native repeat with pinned int locals (no inferable temps).
+pub func pad_r(s: str, w: int) -> str {
+    n: int = len(s)
+    if n >= w {
+        return s
+    }
+    s + str.repeat(" ", w - n)
+}
+
+pub func pad_l(s: str, w: int) -> str {
+    n: int = len(s)
+    if n >= w {
+        return s
+    }
+    str.repeat(" ", w - n) + s
+}
+
+
 // Display theme: hues are specs resolved by apply_color — a color name
 // (green, cyan, bright_red, ...), "#rrggbb" / "#rgb" hex, or "r,g,b".
 // names/specs are per-language overrides ("Rust" -> "#ff5500").
@@ -234,48 +254,50 @@ pub func print_table(t: Table, th: Theme) {
     print_table_full(t, new_table(), th)
 }
 
-// Full table: embedded Markdown-fence rows nest directly under the
-// Markdown row (tokei style), Total closes the table last.
+// Full table: main languages, Total closes the table. Embedded
+// Markdown-fence code always gets its own section afterwards (inline
+// nesting breaks column alignment, so it never renders in-tree).
 pub func print_table_full(t: Table, emb: Table, th: Theme) {
     t = sort_table(t)
     tot := totals(t)
     // header
-    bar := "─────────────────────────────────────────────────────────────────"
+    bar := "────────────────────────────────────────────────────────────────"
     println(bar)
-    h1 := str.pad_right("Language", 16, " ")
-    h2 := str.pad_left("Files", 8, " ")
-    h3 := str.pad_left("Lines", 10, " ")
-    h4 := str.pad_left("Code", 10, " ")
-    h5 := str.pad_left("Comments", 10, " ")
-    h6 := str.pad_left("Blanks", 10, " ")
+    h1 := pad_r("Language", 16)
+    h2 := pad_l("Files", 8)
+    h3 := pad_l("Lines", 10)
+    h4 := pad_l("Code", 10)
+    h5 := pad_l("Comments", 10)
+    h6 := pad_l("Blanks", 10)
     println(maybe_bold(th, apply_color(th, th.header, "{h1}{h2}{h3}{h4}{h5}{h6}")))
     println(bar)
     for i in 0..len(t.langs) {
         lang := t.langs[i]
-        c1 := str.pad_right(lang, 16, " ")
-        c2 := str.pad_left(str(t.files[i]), 8, " ")
-        c3 := str.pad_left(str(t.lines[i]), 10, " ")
-        c4 := str.pad_left(str(t.code[i]), 10, " ")
-        c5 := str.pad_left(str(t.comments[i]), 10, " ")
-        c6 := str.pad_left(str(t.blanks[i]), 10, " ")
+        c1 := pad_r(lang, 16)
+        c2 := pad_l(str(t.files[i]), 8)
+        c3 := pad_l(str(t.lines[i]), 10)
+        c4 := pad_l(str(t.code[i]), 10)
+        c5 := pad_l(str(t.comments[i]), 10)
+        c6 := pad_l(str(t.blanks[i]), 10)
         line := "{c1}{c2}{c3}{c4}{c5}{c6}"
         if is_plain_lang(th, lang) {
             println(line)
         } else {
             println(lang_cell(th, lang, c1) + "{c2}{c3}{c4}{c5}{c6}")
         }
-        if lang == "Markdown" && len(emb.langs) > 0 {
-            print_emb_rows(emb, th)
-        }
     }
     println(bar)
-    tc1 := str.pad_right("Total", 16, " ")
-    tc2 := str.pad_left(str(tot[0]), 8, " ")
-    tc3 := str.pad_left(str(tot[1]), 10, " ")
-    tc4 := str.pad_left(str(tot[2]), 10, " ")
-    tc5 := str.pad_left(str(tot[3]), 10, " ")
-    tc6 := str.pad_left(str(tot[4]), 10, " ")
+    tc1 := pad_r("Total", 16)
+    tc2 := pad_l(str(tot[0]), 8)
+    tc3 := pad_l(str(tot[1]), 10)
+    tc4 := pad_l(str(tot[2]), 10)
+    tc5 := pad_l(str(tot[3]), 10)
+    tc6 := pad_l(str(tot[4]), 10)
     println(maybe_bold(th, apply_color(th, th.total, "{tc1}{tc2}{tc3}{tc4}{tc5}{tc6}")))
+    println(bar)
+    if find_lang(t, "Markdown") >= 0 && len(emb.langs) > 0 {
+        print_emb_section(emb, th)
+    }
 }
 
 // Display prefix ("└ Rust") back to the language name for override
@@ -290,7 +312,7 @@ pub func emb_base_lang(lang: str) -> str {
     lang
 }
 
-pub func print_emb_rows(emb: Table, th: Theme) {
+pub func print_emb_section(emb: Table, th: Theme) {
     if len(emb.langs) == 0 {
         return
     }
@@ -300,31 +322,38 @@ pub func print_emb_rows(emb: Table, th: Theme) {
         t = add_row(t, emb.langs[i], emb.files[i], emb.lines[i], emb.code[i], emb.comments[i], emb.blanks[i])
     }
     t = sort_table(t)
+    println("")
+    println(" Markdown (embedded code)")
     for i in 0..len(t.langs) {
-        lang := t.langs[i]
-        c1 := str.pad_right(" ├ " + lang, 16, " ")
-        c2 := str.pad_left(str(t.files[i]), 8, " ")
-        c3 := str.pad_left(str(t.lines[i]), 10, " ")
-        c4 := str.pad_left(str(t.code[i]), 10, " ")
-        c5 := str.pad_left(str(t.comments[i]), 10, " ")
-        c6 := str.pad_left(str(t.blanks[i]), 10, " ")
+        lang := emb_base_lang(t.langs[i])
+        c1 := pad_r(" " + lang, 16)
+        c2 := pad_l(str(t.files[i]), 8)
+        c3 := pad_l(str(t.lines[i]), 10)
+        c4 := pad_l(str(t.code[i]), 10)
+        c5 := pad_l(str(t.comments[i]), 10)
+        c6 := pad_l(str(t.blanks[i]), 10)
         line := "{c1}{c2}{c3}{c4}{c5}{c6}"
-        // emb rows follow per-language overrides only (default plain).
-        base := emb_base_lang(lang)
-        ov := theme_lang_color(th, base)
-        if ov != "" && th.color {
-            println(colors.dim(maybe_bold(th, apply_color(th, ov, c1))))
+        // section rows follow per-language overrides, else the default
+        // language hue (never plain: the section is opt-in detail).
+        // dimmed to set the section apart from the main table.
+        spec := theme_lang_color(th, lang)
+        if spec == "" {
+            spec = th.language
+        }
+        if th.color {
+            println(colors.dim(maybe_bold(th, apply_color(th, spec, c1))) + "{c2}{c3}{c4}{c5}{c6}")
         } else {
             println(line)
         }
     }
     tot := totals(t)
-    c1 := str.pad_right(" └ (Total)", 16, " ")
-    c2 := str.pad_left(str(tot[0]), 8, " ")
-    c3 := str.pad_left(str(tot[1]), 10, " ")
-    c4 := str.pad_left(str(tot[2]), 10, " ")
-    c5 := str.pad_left(str(tot[3]), 10, " ")
-    c6 := str.pad_left(str(tot[4]), 10, " ")
+    // "└" is 3 bytes / 1 column: over-pad by 2 so the row spans 16 columns.
+    c1 := pad_r(" └ (Total)", 18)
+    c2 := pad_l(str(tot[0]), 8)
+    c3 := pad_l(str(tot[1]), 10)
+    c4 := pad_l(str(tot[2]), 10)
+    c5 := pad_l(str(tot[3]), 10)
+    c6 := pad_l(str(tot[4]), 10)
     println("{c1}{c2}{c3}{c4}{c5}{c6}")
 }
 
