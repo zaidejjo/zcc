@@ -207,19 +207,6 @@ the demo above).
 Warm cache + pruning walk; startup floor is ~35ms. `--no-cache`
 numbers are the honest cold metric.
 
-## Release (maintainers)
-
-1. Ensure `packaging/zz.rev` pins the ZZ commit you built against.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
-3. CI stamps the version, runs tests, builds the release binary,
-   creates the GitHub release (binary + source tarballs + checksums),
-   then renders `packaging/aur/PKGBUILD.template` and pushes it to the
-   AUR (`zcc` package) with generated `.SRCINFO`.
-
-One-time AUR setup: generate an SSH key, register it on your AUR
-account, and save the private key as the `AUR_SSH_PRIVATE_KEY` repo
-secret. The workflow creates the `zcc` AUR repo on first push.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
