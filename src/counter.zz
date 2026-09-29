@@ -28,21 +28,23 @@ pub func is_blank(s: str) -> bool {
 }
 
 // True when blanking strings could change classification: line has a
-// quote AND a comment marker or block opener. Lets most lines skip the
-// per-char strip loop entirely (native contains calls are Rust speed).
-pub func needs_strip(line: str, markers: [str], bstart: str) -> bool {
-    if !str.contains(line, "\"") && !str.contains(line, "'") && !str.contains(line, "`") {
-        return false
-    }
-    for m in markers {
-        if m != "" && str.contains(line, m) {
-            return true
+// comment marker or block opener AND a quote. Marker-first: plain code
+// lines (the majority) exit after 1-2 native scans without touching
+// quotes; quote scans run only when blanking might matter.
+pub func needs_strip(line: str, markers: [str], has_bstart: bool) -> bool {
+    if !has_bstart {
+        found := false
+        for m in markers {
+            if m != "" && str.contains(line, m) {
+                found = true
+                break
+            }
+        }
+        if !found {
+            return false
         }
     }
-    if bstart != "" && str.contains(line, bstart) {
-        return true
-    }
-    false
+    str.contains(line, "\"") || str.contains(line, "'") || str.contains(line, "`")
 }
 
 pub func starts_with_any(s: str, markers: [str]) -> bool {
@@ -100,6 +102,10 @@ pub func count_content(content: str, lang: str) -> Counts {
 // Callers pass resolve_markers(table, lang) unpacked.
 pub func count_content_with(content: str, lang: str, markers: [str], bstart: str, bend: str) -> Counts {
     c := zero()
+    nlines := 0
+    ncode := 0
+    ncomments := 0
+    nblanks := 0
     // Markdown: code fences switch embedded language; prose counts as comments
     // (matches tokei: Markdown row shows comments+blanks, code in child rows).
     if lang == "Markdown" {
@@ -127,38 +133,43 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
     depth := 0
     nested := lang == "Rust" || lang == "Swift" || lang == "Julia"
     for raw in lines {
-        c.lines = c.lines + 1
+        nlines = nlines + 1
+        if raw == "" {
+            nblanks = nblanks + 1
+            continue
+        }
         t := str.trim(raw)
         if t == "" {
-            c.blanks = c.blanks + 1
+            nblanks = nblanks + 1
             continue
         }
         if whole_line_block {
             if t == bstart {
                 in_block = true
-                c.comments = c.comments + 1
+                ncomments = ncomments + 1
                 continue
             }
             if t == bend {
                 in_block = false
-                c.comments = c.comments + 1
+                ncomments = ncomments + 1
                 continue
             }
             if in_block {
-                c.comments = c.comments + 1
+                ncomments = ncomments + 1
                 continue
             }
             if starts_with_any(t, markers) {
-                c.comments = c.comments + 1
+                ncomments = ncomments + 1
             } else {
-                c.code = c.code + 1
+                ncode = ncode + 1
             }
             continue
         }
         // Inside block comment: look for end (nest-aware).
         if in_block {
             cleaned := raw
-            if needs_strip(raw, markers, bstart) {
+            has_open := bstart != "" && str.contains(raw, bstart)
+            if needs_strip(raw, markers, has_open) {
                 cleaned = blank_strings(raw)
             }
             if nested {
@@ -179,25 +190,37 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
                     tail := str.trim(after[len(after) - 1])
                     if tail != "" && !starts_with_any(t, markers) {
                         // mixed line: count as code (tokei counts code-biased)
-                        c.code = c.code + 1
+                        ncode = ncode + 1
                         continue
                     }
                 }
             }
-            c.comments = c.comments + 1
+            ncomments = ncomments + 1
             continue
         }
         // Line comment at start (after trim)?
         if starts_with_any(t, markers) {
-            c.comments = c.comments + 1
+            ncomments = ncomments + 1
             continue
         }
-        cleaned := raw
-        if needs_strip(raw, markers, bstart) {
-            cleaned = blank_strings(raw)
-        }
-        // Block start on this line? (single split shared by both branches)
-        if bstart != "" && str.contains(cleaned, bstart) {
+        // Block start on this line? Gate on the raw line first: strip +
+        // split cost nothing when no opener is present (the common case),
+        // and blanking cannot create an opener, so the split below sees
+        // the same opener exactly when the raw line has one.
+        if bstart != "" && str.contains(raw, bstart) {
+            cleaned := raw
+            if needs_strip(raw, markers, true) {
+                cleaned = blank_strings(raw)
+            }
+            if !str.contains(cleaned, bstart) {
+                // Opener lived inside a string literal: not a block line.
+                // A leading line-comment was ruled out above, so this is
+                // code (matches the old fallthrough: the commented-check
+                // below always finds code here — quote remnants never
+                // trim empty — and no block opens without an opener).
+                ncode = ncode + 1
+                continue
+            }
             idx_parts := str.split(cleaned, bstart)
             before := str.trim(idx_parts[0])
             // Opener sitting inside a line comment (`code // /*`)?
@@ -215,18 +238,18 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
             }
             if commented {
                 if commented_code {
-                    c.code = c.code + 1
+                    ncode = ncode + 1
                 } else {
-                    c.comments = c.comments + 1
+                    ncomments = ncomments + 1
                 }
                 continue
             }
             if bend != "" && str.contains(cleaned, bend) {
                 // inline block on one line: check code before start
                 if before == "" {
-                    c.comments = c.comments + 1
+                    ncomments = ncomments + 1
                 } else {
-                    c.code = c.code + 1
+                    ncode = ncode + 1
                 }
                 continue
             }
@@ -234,15 +257,19 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
             in_block = true
             depth = 1
             if before == "" || starts_with_any(t, markers) {
-                c.comments = c.comments + 1
+                ncomments = ncomments + 1
             } else {
-                c.code = c.code + 1
+                ncode = ncode + 1
             }
             continue
         }
         // Anything left uncommented on the line is code.
-        c.code = c.code + 1
+        ncode = ncode + 1
     }
+    c.lines = nlines
+    c.code = ncode
+    c.comments = ncomments
+    c.blanks = nblanks
     c.files = 1
     c
 }
