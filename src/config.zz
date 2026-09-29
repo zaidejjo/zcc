@@ -32,6 +32,37 @@ import report
 func noop() {
 }
 
+// Default config file content: behaves exactly like no config file.
+// Edit entries to customize (see config.example.json in the repo).
+// Embedded so `zcc init` works from an installed binary anywhere.
+pub func default_config_text() -> str {
+    "{\n  \"display\": {\n    \"color\": true,\n    \"header\": \"cyan\",\n    \"language\": \"green\",\n    \"total\": \"cyan\",\n    \"languages\": {}\n  },\n  \"languages\": {\n    \"MyLang\": {\n      \"extensions\": [\"myl\"],\n      \"files\": [\"Myfile\"],\n      \"line\": [\"#\"],\n      \"block_start\": [\"/*\"],\n      \"block_end\": [\"*/\"]\n    }\n  }\n}\n"
+}
+
+// Write the default config into dir (created if missing). Returns a
+// human message: created / already-exists (without force) / error.
+pub func init_config(dir: str, force: bool) -> str {
+    match fs.mkdir_all(dir) {
+        .ok(_) => write_config(dir, force),
+        .err(e) => "zcc: cannot create {dir}: {e}",
+    }
+}
+
+func write_config(dir: str, force: bool) -> str {
+    sep := "/"
+    if env.os() == "windows" {
+        sep = "\\"
+    }
+    p := dir + sep + "config.json"
+    if fs.exists(p) && !force {
+        return "zcc: {p} already exists (use --force to overwrite)"
+    }
+    match fs.write(p, default_config_text()) {
+        .ok(_) => "zcc: wrote {p}",
+        .err(e) => "zcc: cannot write {p}: {e}",
+    }
+}
+
 pub func config_path() -> str {
     dir := languages.config_dir()
     if env.os() == "windows" {

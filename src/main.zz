@@ -2,7 +2,7 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 21.)
+// (Upstream cache-invalidation bug; entry rev 22.)
 import std.fs
 import std.str
 import std.vec
@@ -26,6 +26,7 @@ func print_help() {
     println("")
     println("USAGE:")
     println("    zcc [path] [flags]")
+    println("    zcc init [--force]")
     println("")
     println("ARGS:")
     println("    [path]              directory or file (default: .)")
@@ -36,6 +37,7 @@ func print_help() {
     println("    --no-ignore         skip .gitignore rules (still skips .git)")
     println("    --no-cache          skip the count cache (always recount)")
     println("    --only LANG         count only this language (e.g. Rust)")
+    println("    --force             with init: overwrite existing config")
     println("    --by-file           list top files by lines after the table")
     println("    --top N             files shown with --by-file (default 20)")
     println("    --help, -h          show this help")
@@ -53,6 +55,7 @@ func print_help() {
     println("        \"block_start\": [\"/*\"], \"block_end\": [\"*/\"]}}}")
     println("")
     println("EXAMPLES:")
+    println("    zcc init            write ~/.config/zcc/config.json")
     println("    zcc .")
     println("    zcc src/ --only Rust")
     println("    zcc . --output json > counts.json")
@@ -65,6 +68,7 @@ func main(cli_args: [str]) {
     include_hidden := false
     use_ignore := true
     use_cache := true
+    force := false
     by_file := false
     topn := 20
     top_next := false
@@ -93,6 +97,10 @@ func main(cli_args: [str]) {
         }
         if a == "--no-cache" {
             use_cache = false
+            continue
+        }
+        if a == "--force" {
+            force = true
             continue
         }
         if a == "--by-file" {
@@ -170,6 +178,11 @@ func main(cli_args: [str]) {
     }
     if show_ver {
         println("zcc {VERSION()}")
+        return
+    }
+    // init subcommand (exact word only: ./init still counts as a path)
+    if target == "init" {
+        println(config.init_config(languages.config_dir(), force))
         return
     }
     // resolve target

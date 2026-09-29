@@ -16,7 +16,14 @@ zcc [path] [flags]
 | `--hidden` | include hidden files/dirs |
 | `--no-ignore` | skip `.gitignore` rules (still skips `.git`) |
 | `--no-cache` | always recount, don't read/write the cache |
+| `--by-file` | list top files by lines after the table |
+| `--top N` | files shown with `--by-file` (default 20) |
 | `--help`, `--version` | |
+
+`zcc init [--force]` writes the default `~/.config/zcc/config.json`
+(Linux/macOS; `%APPDATA%\zcc\config.json` on Windows). Refuses to
+overwrite without `--force`. A bare directory named `init` still
+works as a path (`zcc ./init`).
 
 `NO_COLOR=1` disables all color. Piped output keeps colors unless
 disabled (strip with `--output json` for scripts, or set color off).
@@ -86,6 +93,13 @@ re-point an existing language at new files.
 
 Precedence: builtin `languages.json` < `~/.config/zcc/languages.json`
 < `config.json` → `languages` (later wins per language name).
+
+## Top files and generated code
+
+`--by-file` appends a top-N section (and a `files` array to JSON).
+Files matching generated patterns (bundles, lockfiles, protobuf,
+codegen, `generated/` trees) aggregate under a `Generated` row,
+never into language totals.
 
 ## Count cache
 

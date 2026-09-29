@@ -298,6 +298,45 @@ func test_emb_base_lang() {
 }
 
 @test
+func test_init_config() {
+    base := fs.join(env.temp_dir(), "zcc_init_test")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+    dir := fs.join(base, "zcc")
+    m1 := config.init_config(dir, false)
+    assert(str_contains(m1, "wrote"))
+    assert(fs.exists(fs.join(dir, "config.json")))
+    m2 := config.init_config(dir, false)
+    assert(str_contains(m2, "already exists"))
+    m3 := config.init_config(dir, true)
+    assert(str_contains(m3, "wrote"))
+    // written default parses and equals theme defaults
+    match fs.read_to_string(fs.join(dir, "config.json")) {
+        .ok(text) => {
+            match json.parse(text) {
+                .ok(cfg) => {
+                    th := config.build_theme(cfg)
+                    assert(th.color)
+                    assert_eq(th.header, "cyan")
+                    assert_eq(report.theme_lang_color(th, "Rust"), "")
+                    langs := config.custom_names(cfg)
+                    assert_eq(len(langs), 1)
+                    assert_eq(langs[0], "MyLang")
+                },
+                .err(_) => fail("written config must parse"),
+            }
+        },
+        .err(_) => fail("written config must read"),
+    }
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop(),
+        .err(_) => walker.noop(),
+    }
+}
+
+@test
 func test_theme_from_config() {
     th := config.build_theme(json.null())
     assert(th.color)
