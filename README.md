@@ -1,40 +1,111 @@
-# zcc — blazing-fast code counter (tokei clone, written in ZZ)
+```
+███████   █████   █████
+     ██  ██   ██ ██   ██
+    ██   ██      ██
+   ██    ██      ██
+  ██     ██      ██
+ ██      ██   ██ ██   ██
+███████   █████   █████
+```
 
-Counts code, comments, and blanks across 70+ languages, with Markdown
-fence breakdowns, JSON output, and warm runs under 0.1s.
+[![ci](https://github.com/zaidejjo/zcc/actions/workflows/ci.yml/badge.svg)](https://github.com/zaidejjo/zcc/actions)
+[![release](https://img.shields.io/github/v/release/zaidejjo/zcc)](https://github.com/zaidejjo/zcc/releases)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![arch](https://img.shields.io/badge/arch-x86__64-lightgrey.svg)]()
+
+**The blazing-fast code counter** — 70+ languages, Markdown fence breakdowns,
+JSON output, and warm runs under 0.1s. A tokei clone written in ZZ.
+
+> *"Blink and it's counted."*
+
+---
+
+```
+$ zcc
+────────────────────────────────────────────────────────────────
+Language           Files     Lines      Code  Comments    Blanks
+────────────────────────────────────────────────────────────────
+Rust                 242    115221     95434     12724      7063
+ZZ                   235      7816      5818      1102       896
+Markdown              17      4176      1133      2146       897
+────────────────────────────────────────────────────────────────
+Total                538    143995    115691     18385      9923
+────────────────────────────────────────────────────────────────
+
+ Markdown (embedded code)
+ BASH                 27       186       159         0        27
+ Rust                  9       209       153        30        26
+ └ (Total)            44       479       382        34        63
+```
+
+## Highlights
+
+- **Fast** — ~70ms warm on a 500-file tree (beats tokei); ~300ms cold recount
+- **Smart Markdown** — fenced code blocks attributed to their language
+- **Custom languages** — add your own via config, with comment rules
+- **Themable** — named, hex, or RGB colors globally and per language
+- **Honest JSON** — machine-readable output for scripts and CI
+- **Generated-aware** — bundles, lockfiles and codegen don't pollute totals
+- **Cached** — mtime-keyed counts, instant repeat runs
+
+## Install
+
+**Arch Linux (AUR):**
+```sh
+yay -S zcc
+```
+
+**Prebuilt binary** (Linux x86_64) — from the
+[releases page](https://github.com/zaidejjo/zcc/releases):
+```sh
+tar -xzf zcc-0.1.0-linux-x86_64.tar.gz
+sudo install -Dm755 zcc /usr/bin/zcc
+```
+
+**From source** (needs the [ZZ toolchain](https://github.com/zaidejjo/zz)):
+```sh
+git clone https://github.com/zaidejjo/zcc.git && cd zcc
+cargo install --path ~/zz/crates/zz_cli   # the ZZ compiler
+zz build -p src/main.zz
+sudo cp src/bin/main /usr/bin/zcc
+```
+
+## Usage
 
 ```sh
 zcc [path] [flags]
+zcc init [--force]
 ```
-
-## Flags
 
 | Flag | Effect |
 |------|--------|
 | `--output json` | machine-readable JSON on stdout |
 | `--only LANG` | count one language (`--only Rust`) |
+| `--by-file` | list top files by lines after the table |
+| `--top N` | files shown with `--by-file` (default 20) |
 | `--hidden` | include hidden files/dirs |
 | `--no-ignore` | skip `.gitignore` rules (still skips `.git`) |
 | `--no-cache` | always recount, don't read/write the cache |
-| `--by-file` | list top files by lines after the table |
-| `--top N` | files shown with `--by-file` (default 20) |
+| `--force` | with `init`: overwrite existing config |
 | `--help`, `--version` | |
 
-`zcc init [--force]` writes the default `~/.config/zcc/config.json`
-(Linux/macOS; `%APPDATA%\zcc\config.json` on Windows). Refuses to
-overwrite without `--force`. A bare directory named `init` still
-works as a path (`zcc ./init`).
+```sh
+zcc .                              # this tree
+zcc src/ --only Rust               # one language
+zcc . --output json > counts.json  # scripts love this
+zcc --by-file --top 10             # where is all that code?
+zcc init                           # scaffold ~/.config/zcc/config.json
+```
 
-`NO_COLOR=1` disables all color. Piped output keeps colors unless
-disabled (strip with `--output json` for scripts, or set color off).
+`NO_COLOR=1` disables all color.
 
-## Config file: `~/.config/zcc/config.json`
+## Configuration
 
-All customization lives in one JSON file (see `config.example.json`).
-Missing file, bad JSON, or unknown keys all fall back to defaults —
-the config can never break a run. Samples: `config.example.json`
-(full schema), `config.example-zz.json` (ZZ theme + restated ZZ
-rules — copy to `~/.config/zcc/config.json` and tweak).
+All customization lives in `~/.config/zcc/config.json`
+(`%APPDATA%\zcc\config.json` on Windows). Scaffold it with `zcc init`,
+steal ideas from `config.example.json`, or theme it like
+`config.example-zz.json`. Missing file, bad JSON, or unknown keys all
+fall back to defaults — the config can never break a run.
 
 ```json
 {
@@ -44,8 +115,8 @@ rules — copy to `~/.config/zcc/config.json` and tweak).
     "language": "green",
     "total": "cyan",
     "languages": {
-      "Rust": "#ff5500",
-      "Python": "255,165,0"
+      "ZZ": "#1e8ffb",
+      "Rust": "#ff5500"
     }
   },
   "languages": {
@@ -121,27 +192,20 @@ UTF-8 read + NUL scan (single read per file).
 ## Markdown fences
 
 Fenced code blocks count toward the parent Markdown row (as comments,
-like tokei) and get their own aligned section after the table:
-
-```
-Total                532    143527    115383     18260      9884
-────────────────────────────────────────────────────────────────
-
- Markdown (embedded code)
- BASH                 27       186       159         0        27
- ...
- └ (Total)            44       479       382        34        63
-```
+like tokei) and get their own aligned section after the table (see
+the demo above).
 
 ## Performance
 
-Warm cache + pruning walk: ~70ms on a 500-file tree (beats tokei;
-startup floor is ~35ms). Cold recount is I/O-bound at roughly
-1s per 250k lines. `--no-cache` numbers are the honest cold metric.
+| Run | zz_lang tree (538 files) |
+|-----|--------------------------|
+| Warm cache | **~70ms** |
+| Cold recount | ~300ms |
+| `tokei` (warm) | ~88ms |
+| `scc` (warm) | ~59ms |
 
-## License
-
-MIT — see [LICENSE](LICENSE).
+Warm cache + pruning walk; startup floor is ~35ms. `--no-cache`
+numbers are the honest cold metric.
 
 ## Release (maintainers)
 
@@ -155,3 +219,7 @@ MIT — see [LICENSE](LICENSE).
 One-time AUR setup: generate an SSH key, register it on your AUR
 account, and save the private key as the `AUR_SSH_PRIVATE_KEY` repo
 secret. The workflow creates the `zcc` AUR repo on first push.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
