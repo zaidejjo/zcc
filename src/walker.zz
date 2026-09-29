@@ -387,15 +387,10 @@ pub func default_skip(name: str) -> bool {
 
 // Generated files (bundles, lockfiles, protobuf, codegen output) count
 // into a separate "Generated" row, never into language totals. v1 is
-// filename/dir rules only (no content sniffing).
+// filename/dir rules only (no content sniffing). Branched by extension
+// so ordinary sources exit after 2-3 cheap checks.
 pub func is_generated(path: str) -> bool {
     b := fs.basename(path)
-    if str.ends_with(b, ".min.js") || str.ends_with(b, ".min.css") {
-        return true
-    }
-    if str.ends_with(b, ".bundle.js") || str.ends_with(b, "-bundle.js") {
-        return true
-    }
     if b == "package-lock.json" || b == "yarn.lock" || b == "Gemfile.lock" {
         return true
     }
@@ -405,24 +400,44 @@ pub func is_generated(path: str) -> bool {
     if b == "poetry.lock" || b == "pnpm-lock.yaml" {
         return true
     }
-    if str.ends_with(b, ".pb.go") || str.ends_with(b, ".pb.cc") {
-        return true
+    ext := fs.extension(b)
+    if ext == "js" || ext == "css" {
+        if str.ends_with(b, ".min.js") || str.ends_with(b, ".min.css") {
+            return true
+        }
+        if str.ends_with(b, ".bundle.js") || str.ends_with(b, "-bundle.js") {
+            return true
+        }
+        return gen_dir(path)
     }
-    if str.ends_with(b, ".pb.h") || str.ends_with(b, ".pb.py") {
-        return true
+    if ext == "" {
+        return gen_dir(path)
     }
-    if str.ends_with(b, "_pb2.py") || str.ends_with(b, ".g.dart") {
-        return true
+    if ext == "go" || ext == "cc" || ext == "h" || ext == "py" || ext == "dart" {
+        if str.ends_with(b, ".pb.go") || str.ends_with(b, ".pb.cc") {
+            return true
+        }
+        if str.ends_with(b, ".pb.h") || str.ends_with(b, ".pb.py") {
+            return true
+        }
+        if str.ends_with(b, "_pb2.py") || str.ends_with(b, ".g.dart") {
+            return true
+        }
+        if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
+            return true
+        }
+        return gen_dir(path)
     }
     if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
         return true
     }
-    // generated/ anywhere in the path (scanning generated/ itself marks
-    // everything inside it generated, which is the honest answer).
-    if str.contains(path, "/generated/") || str.starts_with(path, "generated/") {
-        return true
-    }
-    false
+    gen_dir(path)
+}
+
+// Inside a generated/ tree everything counts generated (scanning
+// generated/ itself marks the whole subtree, which is honest).
+func gen_dir(path: str) -> bool {
+    str.contains(path, "/generated/") || str.starts_with(path, "generated/")
 }
 
 pub func rel_path(root: str, full: str) -> str {

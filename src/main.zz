@@ -2,7 +2,7 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 18.)
+// (Upstream cache-invalidation bug; entry rev 21.)
 import std.fs
 import std.str
 import std.vec
@@ -283,12 +283,14 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                         emb = cache.merge_emb_val(emb, embval)
                         counted = counted + 1
                         saverows = vec.push(saverows, cache.enc_entry_arr(f, sig[0], sig[1], show, li, co, cm, bl, cache.emb_array_joins(embval)))
-                        fpaths = vec.push(fpaths, f)
-                        flangs = vec.push(flangs, show)
-                        flines = vec.push(flines, li)
-                        fcode = vec.push(fcode, co)
-                        fcomments = vec.push(fcomments, cm)
-                        fblanks = vec.push(fblanks, bl)
+                        if by_file {
+                            fpaths = vec.push(fpaths, f)
+                            flangs = vec.push(flangs, show)
+                            flines = vec.push(flines, li)
+                            fcode = vec.push(fcode, co)
+                            fcomments = vec.push(fcomments, cm)
+                            fblanks = vec.push(fblanks, bl)
+                        }
                         hit = true
                     }
                 }
@@ -309,12 +311,14 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
                 t = report.add_row(t, show, 1, c.lines, c.code, c.comments, c.blanks)
                 counted = counted + 1
-                fpaths = vec.push(fpaths, f)
-                flangs = vec.push(flangs, show)
-                flines = vec.push(flines, c.lines)
-                fcode = vec.push(fcode, c.code)
-                fcomments = vec.push(fcomments, c.comments)
-                fblanks = vec.push(fblanks, c.blanks)
+                if by_file {
+                    fpaths = vec.push(fpaths, f)
+                    flangs = vec.push(flangs, show)
+                    flines = vec.push(flines, c.lines)
+                    fcode = vec.push(fcode, c.code)
+                    fcomments = vec.push(fcomments, c.comments)
+                    fblanks = vec.push(fblanks, c.blanks)
+                }
                 fenc := ""
                 if lang == "Markdown" && show == "Markdown" {
                     fenc = fence_enc(text)
