@@ -165,6 +165,10 @@ jobs:
           case "$SSH_OUT" in
             *"Host key verification failed"*)
               echo "error: AUR host key verification failed against pinned keys." >&2
+              echo "--- DEBUG: what this runner actually sees ---" >&2
+              ssh -V >&2 || true
+              getent ahosts aur.archlinux.org >&2 || echo "(no getent result)" >&2
+              ssh-keyscan aur.archlinux.org 2>/dev/null | grep -v "^#" | ssh-keygen -lf - >&2 || echo "(keyscan produced no keys)" >&2
               exit 1
               ;;
           esac
