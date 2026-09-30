@@ -140,6 +140,11 @@ jobs:
 
       - name: Setup AUR ssh
         run: |
+          # GitHub pins HOME=/github/home in containers but OpenSSH resolves
+          # ~ via getpwuid (/root) — without this, shell and ssh use two
+          # different homes and ssh never finds known_hosts ("Host key
+          # verification failed" with correct keys in the file).
+          export HOME=/root
           if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ]; then
             echo "error: secret AUR_SSH_PRIVATE_KEY is not set." >&2
             exit 1
@@ -181,6 +186,8 @@ jobs:
 
       - name: Push to AUR
         run: |
+          export HOME=/root
+          git config --global --add safe.directory '*'
           # First release ever: the AUR repo does not exist yet, so clone
           # fails and we initialise it locally instead (first push creates it).
           git clone ssh://aur@aur.archlinux.org/zcc.git aurpush 2>/dev/null || {
