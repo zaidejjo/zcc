@@ -10,6 +10,7 @@
 
 [![ci](https://github.com/zaidejjo/zcc/actions/workflows/ci.yml/badge.svg)](https://github.com/zaidejjo/zcc/actions)
 [![release](https://img.shields.io/github/v/release/zaidejjo/zcc)](https://github.com/zaidejjo/zcc/releases)
+[![aur](https://img.shields.io/aur/version/zcc)](https://aur.archlinux.org/packages/zcc)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![arch](https://img.shields.io/badge/arch-x86__64-lightgrey.svg)]()
 

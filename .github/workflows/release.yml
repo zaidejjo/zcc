@@ -1,5 +1,17 @@
 name: release
 
+# Cut a release by pushing a tag: `git tag v0.2.0 && git push origin v0.2.0`.
+# Tags the current main tree; version stamping happens from the tag name.
+#
+# Two jobs, strict order:
+#   build — prebuilt zz toolchain (pinned in packaging/zz.version), zz test,
+#           native release build, binary + source tarballs uploaded to the
+#           GitHub Release.
+#   aur   — Arch container: render the PKGBUILD from its template, generate
+#           .SRCINFO with makepkg, push to the `zcc` AUR repo over SSH
+#           (first push creates the package). Plain steps, pinned host keys —
+#           see packaging/aur/aur_known_hosts.
+
 on:
   push:
     tags: ["v*"]
@@ -15,29 +27,21 @@ jobs:
         with:
           path: zcc
 
-      - name: Install Clang
-        run: sudo apt-get update -q && sudo apt-get install -y -q clang
+      - name: Install native deps
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang libcurl4-openssl-dev libsqlite3-dev unzip
 
-      - name: Check out ZZ toolchain at pinned rev
-        uses: actions/checkout@v4
-        with:
-          repository: zaidejjo/zz
-          path: zz
-
-      - name: Enforce pinned toolchain
+      - name: Install prebuilt zz toolchain
+        # Built once per zz release upstream — never compiled here.
         run: |
-          PIN=$(tr -d '[:space:]' < zcc/packaging/zz.rev)
-          git -C zz fetch --depth 1 origin "$PIN"
-          git -C zz checkout "$PIN"
-          echo "toolchain: $(git -C zz rev-parse HEAD)"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install zz
-        run: |
-          cargo install --path zz/crates/zz_cli --root "$HOME/.local"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
+          test -n "$ZZVER"
+          curl -fsSL "https://github.com/zaidejjo/zz/releases/download/v$ZZVER/zz-$ZZVER-linux-x86_64.zip" \
+            -o /tmp/zz.zip
+          mkdir -p "$HOME/.local/zz-toolchain"
+          unzip -o -q /tmp/zz.zip -d "$HOME/.local/zz-toolchain"
+          "$HOME/.local/zz-toolchain/zz" --version
+          echo "ZZVER=$ZZVER" >> "$GITHUB_ENV"
+          echo "$HOME/.local/zz-toolchain" >> "$GITHUB_PATH"
 
       - name: Stamp version from tag
         run: |
@@ -90,7 +94,7 @@ jobs:
   aur:
     needs: build
     runs-on: ubuntu-latest
-    container: archlinux:latest
+    container: archlinux:base-devel
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,7 +102,12 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Install tools
-        run: pacman -Sy --noconfirm git openssh base-devel
+        run: |
+          pacman -Syu --noconfirm git openssh namcap >/dev/null 2>&1
+          useradd -m builder 2>/dev/null || true
+          git config --global --add safe.directory '*'
+          git config --global user.name "zcc-ci"
+          git config --global user.email "zcc-ci@users.noreply.github.com"
 
       - name: Fetch source tarball hash
         uses: actions/download-artifact@v4
@@ -110,34 +119,73 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           SHA=$(awk "/zcc-$VERSION-src.tar.gz/ {print \$1}" /tmp/artifacts/sha256sums.txt)
-          ZZREV=$(tr -d '[:space:]' < zcc/packaging/zz.rev)
-          test -n "$SHA" && test -n "$ZZREV"
+          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
+          test -n "$SHA" && test -n "$ZZVER"
+          # Hash the pinned prebuilt toolchain zip (same URL the PKGBUILD uses).
+          curl -fsSL "https://github.com/zaidejjo/zz/releases/download/v$ZZVER/zz-$ZZVER-linux-x86_64.zip" \
+            -o /tmp/zz-toolchain.zip
+          ZZSHA=$(sha256sum /tmp/zz-toolchain.zip | cut -d' ' -f1)
           mkdir -p aurpkg
-          sed -e "s/@PKGVER@/$VERSION/g" -e "s/@SHA256@/$SHA/g" -e "s/@_ZZ_REV@/$ZZREV/g" \
+          sed -e "s/@PKGVER@/$VERSION/g" -e "s/@SHA256@/$SHA/g" \
+              -e "s/@ZZVER@/$ZZVER/g" -e "s/@ZZSHA@/$ZZSHA/g" \
             zcc/packaging/aur/PKGBUILD.template > aurpkg/PKGBUILD
-          cd aurpkg && makepkg --printsrcinfo > .SRCINFO && cat PKGBUILD
+          rm -rf /tmp/buildpkg && mkdir -p /tmp/buildpkg
+          cp aurpkg/PKGBUILD /tmp/buildpkg/PKGBUILD
+          chown -R builder:builder /tmp/buildpkg
+          su builder -c "cd /tmp/buildpkg && makepkg --printsrcinfo > .SRCINFO"
+          cp /tmp/buildpkg/.SRCINFO aurpkg/.SRCINFO
+          cat aurpkg/PKGBUILD
+          echo "--- namcap ---"
+          su builder -c "cd /tmp/buildpkg && namcap PKGBUILD" || true
 
-      - name: Push to AUR
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      - name: Setup AUR ssh
         run: |
-          test -n "$AUR_SSH_PRIVATE_KEY" || { echo "missing AUR_SSH_PRIVATE_KEY secret"; exit 1; }
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          if [ -z "${AUR_SSH_PRIVATE_KEY:-}" ]; then
+            echo "error: secret AUR_SSH_PRIVATE_KEY is not set." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
-          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o IdentitiesOnly=yes"
-          git config --global user.name "zcc-ci"
-          git config --global user.email "zcc-ci@users.noreply.github.com"
+          # Host keys pinned in-repo (no keyscan to flake). ssh-keygen -F
+          # validates real entries — a grep would match `#` comment lines.
+          cp zcc/packaging/aur/aur_known_hosts ~/.ssh/known_hosts
+          if ! ssh-keygen -F aur.archlinux.org -f ~/.ssh/known_hosts >/dev/null 2>&1; then
+            echo "error: pinned known_hosts has no aur.archlinux.org entry." >&2
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n  IdentitiesOnly yes\n' > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          echo "--- ssh handshake smoke test ---"
+          SSH_OUT="$(ssh -o BatchMode=yes -o ConnectTimeout=15 -T aur@aur.archlinux.org 2>&1)" || true
+          echo "$SSH_OUT"
+          case "$SSH_OUT" in
+            *"Host key verification failed"*)
+              echo "error: AUR host key verification failed against pinned keys." >&2
+              exit 1
+              ;;
+          esac
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+
+      - name: Push to AUR
+        run: |
           # First release ever: the AUR repo does not exist yet, so clone
-          # fails and we initialise it locally instead.
+          # fails and we initialise it locally instead (first push creates it).
           git clone ssh://aur@aur.archlinux.org/zcc.git aurpush 2>/dev/null || {
             mkdir -p aurpush && git -C aurpush init -b master
           }
           cp aurpkg/PKGBUILD aurpkg/.SRCINFO aurpush/
           git -C aurpush add PKGBUILD .SRCINFO
+          if git -C aurpush diff --cached --quiet; then
+            echo "AUR already current, skipping push"
+            exit 0
+          fi
           git -C aurpush -c user.name="zcc-ci" -c user.email="zcc-ci@users.noreply.github.com" \
-            commit -m "zcc ${GITHUB_REF#refs/tags/v}" || echo "nothing to commit"
+            commit -m "zcc ${GITHUB_REF#refs/tags/v}"
           git -C aurpush remote get-url origin 2>/dev/null || \
             git -C aurpush remote add origin ssh://aur@aur.archlinux.org/zcc.git
-          git -C aurpush push origin master
+          git -C aurpush push origin HEAD:master

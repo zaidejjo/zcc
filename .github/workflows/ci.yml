@@ -13,32 +13,24 @@ jobs:
         with:
           path: zcc
 
-      - name: Install Clang
-        run: sudo apt-get update -q && sudo apt-get install -y -q clang
+      - name: Install native deps
+        # zz build shells out to clang and links -lsqlite3 for the native
+        # backend; runner images don't guarantee the headers.
+        run: sudo apt-get update -q && sudo apt-get install -y -q clang libcurl4-openssl-dev libsqlite3-dev unzip
 
-      - name: Check out ZZ toolchain
-        uses: actions/checkout@v4
-        with:
-          repository: zaidejjo/zz
-          path: zz
-      # The exact toolchain rev comes from packaging/zz.rev (fetched and
-      # checked out below); the initial checkout is only a starting point.
-      - name: Enforce pinned toolchain
+      - name: Install prebuilt zz toolchain
+        # Built once per zz release upstream — never compiled here.
+        # Pinned in zcc/packaging/zz.version; bump that file to adopt a
+        # newer compiler.
         run: |
-          PIN=$(tr -d '[:space:]' < zcc/packaging/zz.rev)
-          GOT=$(git -C zz rev-parse HEAD)
-          # Shallow/dev drift check: fetch the pinned rev explicitly.
-          git -C zz fetch --depth 1 origin "$PIN"
-          git -C zz checkout "$PIN"
-          echo "toolchain: $(git -C zz rev-parse HEAD) (pin $PIN)"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install zz
-        run: |
-          cargo install --path zz/crates/zz_cli --root "$HOME/.local"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
+          test -n "$ZZVER"
+          curl -fsSL "https://github.com/zaidejjo/zz/releases/download/v$ZZVER/zz-$ZZVER-linux-x86_64.zip" \
+            -o /tmp/zz.zip
+          mkdir -p "$HOME/.local/zz-toolchain"
+          unzip -o -q /tmp/zz.zip -d "$HOME/.local/zz-toolchain"
+          "$HOME/.local/zz-toolchain/zz" --version
+          echo "$HOME/.local/zz-toolchain" >> "$GITHUB_PATH"
 
       - name: zz test
         working-directory: zcc
