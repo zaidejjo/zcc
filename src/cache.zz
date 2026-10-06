@@ -12,14 +12,17 @@
 // chars ever reach the JSON text (the parser mangles \uXXXX).
 // The stored root is validated on load, so slug collisions only ever
 // cost a miss, never wrong data.
+import std.env
 import std.fs
+import std.json
 import std.str
 import std.vec
-import std.json
-import std.env
+
 import report
 
 func noop() {
+    
+    
 }
 
 pub func cache_dir() -> str {
@@ -27,14 +30,14 @@ pub func cache_dir() -> str {
         .some(h) => {
             if env.os() == "windows" {
                 match env.get("LOCALAPPDATA") {
-                    .some(a) => a + "\\zcc-cache",
-                    .none => h + "\\.cache\\zcc",
+                    .some(a) => a + "\\zcc-cache"
+                    .none => h + "\\.cache\\zcc"
                 }
             } else {
                 h + "/.cache/zcc"
             }
-        },
-        .none => ".zcc-cache",
+        }
+        .none => ".zcc-cache"
     }
 }
 
@@ -55,6 +58,7 @@ pub func cache_file(root: str) -> str {
 // JSON-safe escaping (standard escapes only: the parser roundtrips
 // \\, \", \n, \r, \t, \/ but mangles \uXXXX, so control chars never
 // reach the JSON text — emb rows travel as objects, not strings).
+
 pub func esc(s: str) -> str {
     e := str.replace(s, "\\", "\\\\")
     e = str.replace(e, "\"", "\\\"")
@@ -74,6 +78,7 @@ pub func unesc(s: str) -> str {
 }
 
 // Load the files object for root, or json.null() on any failure.
+
 pub func load_files_obj(root: str) -> json {
     cfg := cache_file(root)
     if !fs.exists(cfg) {
@@ -106,17 +111,17 @@ pub func load_files_obj(root: str) -> json {
                                         return json.null()
                                     }
                                     f
-                                },
-                                .err(_) => json.null(),
+                                }
+                                .err(_) => json.null()
                             }
-                        },
-                        .err(_) => json.null(),
+                        }
+                        .err(_) => json.null()
                     }
-                },
-                .err(_) => json.null(),
+                }
+                .err(_) => json.null()
             }
-        },
-        .err(_) => json.null(),
+        }
+        .err(_) => json.null()
     }
 }
 
@@ -133,8 +138,8 @@ pub func lookup_entry(files: json, path: str) -> json {
                 return json.null()
             }
             e
-        },
-        .err(_) => json.null(),
+        }
+        .err(_) => json.null()
     }
 }
 
@@ -148,8 +153,8 @@ pub func entry_str(e: json, key: str) -> str {
                 return ""
             }
             json.as_str(v)
-        },
-        .err(_) => "",
+        }
+        .err(_) => ""
     }
 }
 
@@ -162,27 +167,30 @@ pub func entry_json(e: json, key: str) -> json {
         return json.null()
     }
     match json.get(e, key) {
-        .ok(v) => v,
-        .err(_) => json.null(),
+        .ok(v) => v
+        .err(_) => json.null()
     }
 }
 
 // Current [mtime, size] signature strings (["",""] when unstated).
+
 pub func current_sig(path: str) -> [str] {
     match fs.stat(path) {
-        .ok(m) => [m["modified_ms"], m["size"]],
-        .err(_) => ["", ""],
+        .ok(m) => [m["modified_ms"], m["size"]]
+        .err(_) => ["", ""]
     }
 }
 
 // One files-map row (values raw; esc applied here). emb travels as
 // raw text and is converted by emb_array_text below.
+
 pub func enc_entry(path: str, mtime: str, size: str, lang: str, lines: int, code: int, comments: int, blanks: int, emb: str) -> str {
     enc_entry_arr(path, mtime, size, lang, lines, code, comments, blanks, emb_array_text(emb))
 }
 
 // Same row but with prebuilt emb array text (for carried cache hits).
 // Empty text defaults to [] so the row stays valid JSON.
+
 pub func enc_entry_arr(path: str, mtime: str, size: str, lang: str, lines: int, code: int, comments: int, blanks: int, emb_text: str) -> str {
     arr := emb_text
     if arr == "" {
@@ -195,6 +203,7 @@ pub func enc_entry_arr(path: str, mtime: str, size: str, lang: str, lines: int, 
 
 // Raw emb encoding ("lang\x1f..." rows joined by \x1e) to a JSON array
 // of flat string-valued objects. No control chars reach the text.
+
 pub func emb_array_text(raw: str) -> str {
     if raw == "" {
         return "[]"
@@ -219,6 +228,7 @@ pub func emb_array_text(raw: str) -> str {
 
 // Merge one emb array value into the emb table. Anything malformed is
 // skipped row by row (never a hard error: cache must degrade to miss).
+
 pub func merge_emb_val(emb: report.Table, val: json) -> report.Table {
     if json.type(val) != "array" {
         return emb
@@ -240,14 +250,15 @@ pub func merge_emb_val(emb: report.Table, val: json) -> report.Table {
                     continue
                 }
                 emb = report.add_row(emb, lang, fi, li, co, cm, bl)
-            },
-            .err(_) => noop(),
+            }
+            .err(_) => noop()
         }
     }
     emb
 }
 
 // Re-emit a stored emb array value as array text (for carried hits).
+
 pub func emb_array_joins(val: json) -> str {
     if json.type(val) != "array" {
         return "[]"
@@ -268,8 +279,8 @@ pub func emb_array_joins(val: json) -> str {
                 bl := entry_str(o, "blanks")
                 esc_lang := esc(unesc(lg))
                 parts = vec.push(parts, "{\"lang\": \"{esc_lang}\", \"files\": \"{fi}\", \"lines\": \"{li}\", \"code\": \"{co}\", \"comments\": \"{cm}\", \"blanks\": \"{bl}\"}")
-            },
-            .err(_) => noop(),
+            }
+            .err(_) => noop()
         }
     }
     "[" + str.join(parts, ", ") + "]"
@@ -277,19 +288,25 @@ pub func emb_array_joins(val: json) -> str {
 
 pub func save_cache(root: str, rows: [str]) {
     match fs.mkdir_all(cache_dir()) {
-        .ok(_) => noop(),
-        .err(_) => noop(),
+        .ok(_) => noop()
+        .err(_) => noop()
     }
     body := str.join(rows, ",\n")
-    text := "{\"root\": \"{esc(root)}\", \"files\": {\n{body}\n}}"
+    // NOTE: built by concatenation, not interpolation — a single
+    // interpolated string holding both literal JSON braces and {body}
+    // trips the new {{}}/}} rules (`{\n` warns) and silently aborts
+    // the module load on 0.1.6 (all `cache.*` uses then fail).
+    // Chunks without {name} stay literal; trailing "}}}}" renders "}}".
+    text := "{\"root\": \"" + esc(root) + "\", \"files\": {\n" + body + "\n}}}}"
     match fs.write(cache_file(root), text) {
-        .ok(_) => noop(),
-        .err(_) => noop(),
+        .ok(_) => noop()
+        .err(_) => noop()
     }
 }
 
 // Merge one raw emb encoding ("lang\x1f..." rows joined by \x1e)
 // into the emb table.
+
 pub func merge_emb_enc(emb: report.Table, enc: str) -> report.Table {
     if enc == "" {
         return emb

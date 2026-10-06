@@ -4,21 +4,24 @@
 // module, change this file's bytes too (or the old binary is re-served).
 // (Upstream cache-invalidation bug; entry rev 24.)
 import std.fs
+import std.json
 import std.str
 import std.vec
-import std.json
-import counter
-import languages
-import walker
-import report
+
 import cache
 import config
+import counter
+import languages
+import report
+import walker
 
 pub func VERSION() -> str {
     "0.1.0"
 }
 
 func noop() {
+    
+    
 }
 
 func print_help() {
@@ -232,8 +235,8 @@ func run_single(path: str, only: str, out_json: bool) {
             } else {
                 report.print_table(t, th)
             }
-        },
-        .err(e) => println("zcc: cannot read {path}: {e}"),
+        }
+        .err(e) => println("zcc: cannot read {path}: {e}")
     }
 }
 
@@ -340,8 +343,8 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 if use_cache {
                     saverows = vec.push(saverows, cache.enc_entry(f, sig[0], sig[1], show, c.lines, c.code, c.comments, c.blanks, fenc))
                 }
-            },
-            .err(_) => noop(),
+            }
+            .err(_) => noop()
         }
     }
     // Clean warm runs skip the rewrite: rows round-tripped untouched,
@@ -372,6 +375,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
 }
 
 // First element or "" (block start/end singletons from resolve_markers).
+
 pub func rule_str(xs: [str]) -> str {
     if len(xs) > 0 {
         return xs[0]
@@ -381,6 +385,7 @@ pub func rule_str(xs: [str]) -> str {
 
 // Extract fenced-code rows from one Markdown body as a raw emb
 // encoding (rows joined by \x1e, "" when none).
+
 pub func fence_enc(text: str) -> str {
     rows := []
     fenced := counter.markdown_fences(text)
