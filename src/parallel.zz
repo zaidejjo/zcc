@@ -1,0 +1,158 @@
+// zcc/src/parallel.zz — parallel fan-out for cold recounts.
+//
+// Design (green threads, snapshot isolation):
+// - The main thread does walk + ext-map resolve + cache lookup (cheap,
+//   serial, zero big copies). Only cache MISSES fan out to workers.
+// - Each worker gets plain range data (paths/langs/shows + pre-resolved
+//   marker strings) and returns plain per-file counts. The opaque json
+//   language table never crosses the spawn boundary (it is not
+//   snapshot-safe); only [str]/[int] do.
+// - Workers read their own files: passing bodies in would deep-copy every
+//   byte across the spawn boundary, while paths are tiny. Blocking file
+//   IO parks an executor thread and the pool tops itself up, so parallel
+//   cold reads still win; warm runs (all cache hits) never spawn at all.
+// - Results merge in chunk order, so --by-file and cache rows keep walk
+//   order and output is deterministic run to run.
+// - No fail()/println() inside workers (AOT lowers task panics to unit):
+//   unreadable/binary files return oks[i] == 0 and the merger skips them,
+//   exactly like the serial `continue`.
+import std.fs
+import std.str
+import std.vec
+
+import counter
+import walker
+
+// Per-file results for one chunk, in chunk order.
+
+pub struct ChunkOut {
+    lines: [int],
+    code: [int],
+    comments: [int],
+    blanks: [int],
+    fencs: [str],
+    oks: [int],
+}
+
+// Cross-module constructor (struct literals are same-module only).
+
+pub func new_chunk_out(lines: [int], code: [int], comments: [int], blanks: [int], fencs: [str], oks: [int]) -> ChunkOut {
+    ChunkOut{lines: lines, code: code, comments: comments, blanks: blanks, fencs: fencs, oks: oks}
+}
+
+// Cold runs below this many misses stay serial: spawn + snapshot costs
+// more than it saves on tiny trees (startup floor dominates there).
+
+pub func par_threshold() -> int {
+    32
+}
+
+// Worker count clamp: green threads multiplex onto one OS thread per
+// CPU, so more workers than ~2x cores just adds stealing overhead.
+
+pub func worker_cap() -> int {
+    8
+}
+
+// "" -> no markers (keeps the counter's no-comment fast path);
+// otherwise the \x01-joined marker list from the main thread.
+
+pub func split_markers(mj: str) -> [str] {
+    out:[str] = []
+    if mj == "" {
+        return out
+    }
+    str.split(mj, "\x01")
+}
+
+// Serial worker body over paths[start..end]. Pure function of its args:
+// same inputs as the old serial loop give byte-identical outputs.
+
+pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], bstarts: [str], bends: [str], start: int, end: int) -> ChunkOut {
+    lines := []
+    code := []
+    comments := []
+    blanks := []
+    fencs := []
+    oks := []
+    for i in start..end {
+        match fs.read_to_string(paths[i]) {
+            .ok(text) => {
+                if walker.has_nul(text) {
+                    lines = vec.push(lines, 0)
+                    code = vec.push(code, 0)
+                    comments = vec.push(comments, 0)
+                    blanks = vec.push(blanks, 0)
+                    fencs = vec.push(fencs, "")
+                    oks = vec.push(oks, 0)
+                    continue
+                }
+                markers := split_markers(mjoined[i])
+                c := counter.count_content_with(text, langs[i], markers, bstarts[i], bends[i])
+                lines = vec.push(lines, c.lines)
+                code = vec.push(code, c.code)
+                comments = vec.push(comments, c.comments)
+                blanks = vec.push(blanks, c.blanks)
+                fenc := ""
+                if langs[i] == "Markdown" && shows[i] == "Markdown" {
+                    fenc = fence_enc(text)
+                    noop()
+                }
+                fencs = vec.push(fencs, fenc)
+                oks = vec.push(oks, 1)
+            }
+            .err(_) => {
+                lines = vec.push(lines, 0)
+                code = vec.push(code, 0)
+                comments = vec.push(comments, 0)
+                blanks = vec.push(blanks, 0)
+                fencs = vec.push(fencs, "")
+                oks = vec.push(oks, 0)
+            }
+        }
+    }
+    new_chunk_out(lines, code, comments, blanks, fencs, oks)
+}
+
+func noop() {
+    
+    
+}
+
+// Extract fenced-code rows from one Markdown body as a raw emb
+// encoding (rows joined by \x1e, "" when none). Moved here from main.zz
+// so workers compute it without calling back across the boundary.
+
+pub func fence_enc(text: str) -> str {
+    rows := []
+    fenced := counter.markdown_fences(text)
+    if len(fenced) != 2 {
+        return ""
+    }
+    lang_part := fenced[0]
+    body_part := fenced[1]
+    if lang_part == "" {
+        return ""
+    }
+    llist := str.split(lang_part, "\x01")
+    blist := str.split(body_part, "\x02")
+    for i in 0..len(llist) {
+        tag := llist[i]
+        if tag == "" {
+            continue
+        }
+        body := ""
+        if i < len(blist) {
+            body = blist[i]
+        }
+        disp := tag
+        if disp == "BASH" {
+            disp = "BASH"
+        }
+        ec := counter.count_content(body, disp)
+        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" {
+            rows = vec.push(rows, "└ {disp}\x1f1\x1f{ec.lines}\x1f{ec.code}\x1f{ec.comments}\x1f{ec.blanks}")
+        }
+    }
+    str.join(rows, "\x1e")
+}

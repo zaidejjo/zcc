@@ -2,16 +2,19 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 24.)
+// (Upstream cache-invalidation bug; entry rev 25.)
 import std.fs
 import std.json
 import std.str
+import std.sys
+import std.task
 import std.vec
 
 import cache
 import config
 import counter
 import languages
+import parallel
 import report
 import walker
 
@@ -268,6 +271,18 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     fblanks := []
     misses := 0
     counted := 0
+    // Phase 1 (serial, zero big copies): cheap string-only resolve +
+    // cache hits inline. Misses collect as plain range data only --
+    // the opaque json table never crosses a spawn boundary.
+    mpaths := []
+    mlangs := []
+    mshows := []
+    msig0 := []
+    msig1 := []
+    mjoined := []
+    mbstart := []
+    mbend := []
+    fpos := []
     for f in files {
         // Cheap string-only checks first: zero IO for unknown/filtered-out.
         lang := languages.resolve_fast(em, f)
@@ -315,36 +330,132 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         if hit {
             continue
         }
-        misses = misses + 1
-        // Single read per file: strict UTF-8 read rejects non-UTF8
-        // binaries; has_nul catches the rest.
-        match fs.read_to_string(f) {
-            .ok(text) => {
-                if walker.has_nul(text) {
+        mpaths = vec.push(mpaths, f)
+        mlangs = vec.push(mlangs, lang)
+        mshows = vec.push(mshows, show)
+        msig0 = vec.push(msig0, sig[0])
+        msig1 = vec.push(msig1, sig[1])
+        rules := languages.resolve_markers(table, lang, customs)
+        mjoined = vec.push(mjoined, str.join(rules[0], "\x01"))
+        b0 := ""
+        b1 := ""
+        if len(rules[1]) > 0 {
+            b0 = rules[1][0]
+        }
+        if len(rules[2]) > 0 {
+            b1 = rules[2][0]
+        }
+        mbstart = vec.push(mbstart, b0)
+        mbend = vec.push(mbend, b1)
+        // Placeholder row keeps walk order: counts filled in phase 2.
+        if by_file {
+            fpaths = vec.push(fpaths, f)
+            flangs = vec.push(flangs, show)
+            flines = vec.push(flines, 0)
+            fcode = vec.push(fcode, 0)
+            fcomments = vec.push(fcomments, 0)
+            fblanks = vec.push(fblanks, 0)
+            fpos = vec.push(fpos, len(fpaths) - 1)
+        } else {
+            fpos = vec.push(fpos, -1)
+        }
+    }
+    misses = len(mpaths)
+    // Phase 2: recount misses. Small trees stay serial (spawn + snapshot
+    // cost more than they save); big cold trees fan out over green
+    // threads, one chunk per worker, joined in order (deterministic).
+    if misses > 0 && misses < parallel.par_threshold() {
+        for k in 0..len(mpaths) {
+            // Single read per file: strict UTF-8 read rejects non-UTF8
+            // binaries; has_nul catches the rest.
+            match fs.read_to_string(mpaths[k]) {
+                .ok(text) => {
+                    if walker.has_nul(text) {
+                        continue
+                    }
+                    markers := parallel.split_markers(mjoined[k])
+                    c := counter.count_content_with(text, mlangs[k], markers, mbstart[k], mbend[k])
+                    t = report.add_row(t, mshows[k], 1, c.lines, c.code, c.comments, c.blanks)
+                    counted = counted + 1
+                    if by_file {
+                        p := fpos[k]
+                        flines[p] = c.lines
+                        fcode[p] = c.code
+                        fcomments[p] = c.comments
+                        fblanks[p] = c.blanks
+                    }
+                    fenc := ""
+                    if mlangs[k] == "Markdown" && mshows[k] == "Markdown" {
+                        fenc = parallel.fence_enc(text)
+                        emb = cache.merge_emb_enc(emb, fenc)
+                    }
+                    if use_cache {
+                        saverows = vec.push(saverows, cache.enc_entry(mpaths[k], msig0[k], msig1[k], mshows[k], c.lines, c.code, c.comments, c.blanks, fenc))
+                    }
+                }
+                .err(_) => noop()
+            }
+        }
+    }
+    if misses >= parallel.par_threshold() {
+        // One chunk per core: warm runs are CPU-bound and chunky enough
+        // that this is the sweet spot; cold runs still overlap IO because
+        // blocking reads park a worker while the pool tops itself up.
+        nworkers := sys.cpu_count()
+        if nworkers < 1 {
+            nworkers = 1
+        }
+        if nworkers > parallel.worker_cap() {
+            nworkers = parallel.worker_cap()
+        }
+        if nworkers > misses {
+            nworkers = misses
+        }
+        chunk := (misses + nworkers - 1) / nworkers
+        starts := []
+        ends := []
+        s := 0
+        while s < misses {
+            e := s + chunk
+            if e > misses {
+                e = misses
+            }
+            starts = vec.push(starts, s)
+            ends = vec.push(ends, e)
+            s = e
+        }
+        hs := []
+        for k in 0..len(starts) {
+            cs := starts[k]
+            ce := ends[k]
+            hs = vec.push(hs, task.spawn(|_| {
+                parallel.count_files(mpaths, mlangs, mshows, mjoined, mbstart, mbend, cs, ce)
+            }))
+        }
+        for k in 0..len(hs) {
+            res:parallel.ChunkOut = task.join(hs[k])
+            base := starts[k]
+            for j in 0..len(res.oks) {
+                if res.oks[j] == 0 {
                     continue
                 }
-                rules := languages.resolve_markers(table, lang, customs)
-                c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
-                t = report.add_row(t, show, 1, c.lines, c.code, c.comments, c.blanks)
+                idx := base + j
+                t = report.add_row(t, mshows[idx], 1, res.lines[j], res.code[j], res.comments[j], res.blanks[j])
                 counted = counted + 1
                 if by_file {
-                    fpaths = vec.push(fpaths, f)
-                    flangs = vec.push(flangs, show)
-                    flines = vec.push(flines, c.lines)
-                    fcode = vec.push(fcode, c.code)
-                    fcomments = vec.push(fcomments, c.comments)
-                    fblanks = vec.push(fblanks, c.blanks)
+                    p := fpos[idx]
+                    flines[p] = res.lines[j]
+                    fcode[p] = res.code[j]
+                    fcomments[p] = res.comments[j]
+                    fblanks[p] = res.blanks[j]
                 }
-                fenc := ""
-                if lang == "Markdown" && show == "Markdown" {
-                    fenc = fence_enc(text)
-                    emb = cache.merge_emb_enc(emb, fenc)
+                if mlangs[idx] == "Markdown" && mshows[idx] == "Markdown" {
+                    emb = cache.merge_emb_enc(emb, res.fencs[j])
                 }
                 if use_cache {
-                    saverows = vec.push(saverows, cache.enc_entry(f, sig[0], sig[1], show, c.lines, c.code, c.comments, c.blanks, fenc))
+                    saverows = vec.push(saverows, cache.enc_entry(mpaths[idx], msig0[idx], msig1[idx], mshows[idx], res.lines[j], res.code[j], res.comments[j], res.blanks[j], res.fencs[j]))
                 }
             }
-            .err(_) => noop()
         }
     }
     // Clean warm runs skip the rewrite: rows round-tripped untouched,
@@ -381,41 +492,4 @@ pub func rule_str(xs: [str]) -> str {
         return xs[0]
     }
     ""
-}
-
-// Extract fenced-code rows from one Markdown body as a raw emb
-// encoding (rows joined by \x1e, "" when none).
-
-pub func fence_enc(text: str) -> str {
-    rows := []
-    fenced := counter.markdown_fences(text)
-    if len(fenced) != 2 {
-        return ""
-    }
-    lang_part := fenced[0]
-    body_part := fenced[1]
-    if lang_part == "" {
-        return ""
-    }
-    llist := str.split(lang_part, "\x01")
-    blist := str.split(body_part, "\x02")
-    for i in 0..len(llist) {
-        tag := llist[i]
-        if tag == "" {
-            continue
-        }
-        body := ""
-        if i < len(blist) {
-            body = blist[i]
-        }
-        disp := tag
-        if disp == "BASH" {
-            disp = "BASH"
-        }
-        ec := counter.count_content(body, disp)
-        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" {
-            rows = vec.push(rows, "└ {disp}\x1f1\x1f{ec.lines}\x1f{ec.code}\x1f{ec.comments}\x1f{ec.blanks}")
-        }
-    }
-    str.join(rows, "\x1e")
 }

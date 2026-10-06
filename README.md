@@ -198,15 +198,19 @@ the demo above).
 
 ## Performance
 
-| Run | zz_lang tree (538 files) |
-|-----|--------------------------|
-| Warm cache | **~70ms** |
-| Cold recount | ~300ms |
-| `tokei` (warm) | ~88ms |
-| `scc` (warm) | ~59ms |
+| Run | zz_lang tree (770 countable files) |
+|-----|------------------------------------|
+| Warm cache | **~70ms** (no threads spawned) |
+| Cold recount, parallel | ~400ms page-warm, ~2.7s true-cold |
+| Cold recount, serial | ~520ms page-warm, ~5.4s true-cold |
+| `tokei` | ~380ms page-warm, ~0.5s true-cold |
 
-Warm cache + pruning walk; startup floor is ~35ms. `--no-cache`
-numbers are the honest cold metric.
+Cold recounts fan out over green threads (`task.spawn` + `join`,
+one chunk per core, ≥32 misses) with byte-identical output;
+small trees stay serial and warm cache stays single-threaded.
+`--no-cache` numbers are the honest cold metric. Remaining cold gap
+vs tokei is per-byte allocator pressure, not parallelism —
+see `src/parallel.zz` design notes.
 
 ## License
 
