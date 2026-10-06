@@ -3,12 +3,19 @@
 // triple-quote doc strings (Python), Markdown fenced embeds.
 import std.str
 import std.vec
+
 import languages
 
-pub struct Counts { files: int, lines: int, code: int, comments: int, blanks: int }
+pub struct Counts {
+    files: int,
+    lines: int,
+    code: int,
+    comments: int,
+    blanks: int,
+}
 
 pub func zero() -> Counts {
-    Counts{ files: 0, lines: 0, code: 0, comments: 0, blanks: 0 }
+    Counts{files: 0, lines: 0, code: 0, comments: 0, blanks: 0}
 }
 
 pub func split_lines(content: str) -> [str] {
@@ -31,6 +38,7 @@ pub func is_blank(s: str) -> bool {
 // comment marker or block opener AND a quote. Marker-first: plain code
 // lines (the majority) exit after 1-2 native scans without touching
 // quotes; quote scans run only when blanking might matter.
+
 pub func needs_strip(line: str, markers: [str], has_bstart: bool) -> bool {
     if !has_bstart {
         found := false
@@ -60,6 +68,7 @@ pub func starts_with_any(s: str, markers: [str]) -> bool {
 // Same toggle semantics as the old per-char stripper (including the
 // apostrophe quirk), but segment loops instead of char loops:
 // O(segments) interpreted iterations, heavy lifting in Rust/C.
+
 pub func blank_quote(line: str, q: str) -> str {
     esc := "\\" + q
     s := str.replace(line, "\\\\", "  ")
@@ -100,6 +109,7 @@ pub func count_content(content: str, lang: str) -> Counts {
 
 // Same count with pre-resolved rules (custom languages via table).
 // Callers pass resolve_markers(table, lang) unpacked.
+
 pub func count_content_with(content: str, lang: str, markers: [str], bstart: str, bend: str) -> Counts {
     c := zero()
     nlines := 0
@@ -277,6 +287,7 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
 // Markdown: prose -> comments, fences -> embedded code counted via child map.
 // We return prose counts here; main.zz attributes fence blocks to inner langs
 // by re-running count_content on fence bodies.
+
 pub func count_markdown(content: str) -> Counts {
     c := zero()
     lines := split_lines(content)
@@ -314,6 +325,7 @@ pub func count_markdown(content: str) -> Counts {
 }
 
 // Extract fenced blocks: returns parallel arrays [lang, body].
+
 pub func markdown_fences(content: str) -> [str] {
     langs := []
     bodies := []

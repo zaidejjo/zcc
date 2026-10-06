@@ -21,30 +21,35 @@
 // Custom languages merge over builtin + languages.json entries: the whole
 // entry is replaced per name. Comment rules apply to NEW languages;
 // builtin languages keep their hardcoded rules (stable counts).
+import std.env
 import std.fs
+import std.json
 import std.str
 import std.vec
-import std.json
-import std.env
+
 import languages
 import report
 
 func noop() {
+    
+    
 }
 
 // Default config file content: behaves exactly like no config file.
 // Edit entries to customize (see config.example.json in the repo).
 // Embedded so `zcc init` works from an installed binary anywhere.
+
 pub func default_config_text() -> str {
     "{\n  \"display\": {\n    \"color\": true,\n    \"header\": \"cyan\",\n    \"language\": \"green\",\n    \"total\": \"cyan\",\n    \"languages\": {\n      \"ZZ\": \"#1e8ffb\",\n      \"Rust\": \"#ff5500\"\n    }\n  },\n  \"languages\": {}\n}\n"
 }
 
 // Write the default config into dir (created if missing). Returns a
 // human message: created / already-exists (without force) / error.
+
 pub func init_config(dir: str, force: bool) -> str {
     match fs.mkdir_all(dir) {
-        .ok(_) => write_config(dir, force),
-        .err(e) => "zcc: cannot create {dir}: {e}",
+        .ok(_) => write_config(dir, force)
+        .err(e) => "zcc: cannot create {dir}: {e}"
     }
 }
 
@@ -58,8 +63,8 @@ func write_config(dir: str, force: bool) -> str {
         return "zcc: {p} already exists (use --force to overwrite)"
     }
     match fs.write(p, default_config_text()) {
-        .ok(_) => "zcc: wrote {p}",
-        .err(e) => "zcc: cannot write {p}: {e}",
+        .ok(_) => "zcc: wrote {p}"
+        .err(e) => "zcc: cannot write {p}: {e}"
     }
 }
 
@@ -74,6 +79,7 @@ pub func config_path() -> str {
 
 // Parsed config object, or json.null() when missing/unparsable
 // (callers fall back to defaults: never an error).
+
 pub func load_config() -> json {
     p := config_path()
     if !fs.exists(p) {
@@ -87,11 +93,11 @@ pub func load_config() -> json {
                         return json.null()
                     }
                     j
-                },
-                .err(_) => json.null(),
+                }
+                .err(_) => json.null()
             }
-        },
-        .err(_) => json.null(),
+        }
+        .err(_) => json.null()
     }
 }
 
@@ -103,8 +109,8 @@ pub func obj_field(o: json, key: str) -> json {
         return json.null()
     }
     match json.get(o, key) {
-        .ok(v) => v,
-        .err(_) => json.null(),
+        .ok(v) => v
+        .err(_) => json.null()
     }
 }
 
@@ -134,6 +140,7 @@ pub func obj_bool(o: json, key: str, fallback: bool) -> bool {
 }
 
 // "languages" custom-language object, or null.
+
 pub func custom_langs(cfg: json) -> json {
     v := obj_field(cfg, "languages")
     if json.type(v) != "object" {
@@ -143,6 +150,7 @@ pub func custom_langs(cfg: json) -> json {
 }
 
 // Names of custom languages defined in the config (for rule precedence).
+
 pub func custom_names(cfg: json) -> [str] {
     out := []
     c := custom_langs(cfg)
@@ -157,6 +165,7 @@ pub func custom_names(cfg: json) -> [str] {
 
 // Full language table: builtin + user languages.json + config customs
 // (later wins per language name).
+
 pub func lang_table_with(cfg: json) -> json {
     t := languages.load_lang_table()
     c := custom_langs(cfg)
@@ -179,8 +188,8 @@ pub func build_theme(cfg: json) -> report.Theme {
     match env.get("NO_COLOR") {
         .some(_) => {
             color = false
-        },
-        .none => noop(),
+        }
+        .none => noop()
     }
     disp := obj_field(cfg, "display")
     if json.type(disp) == "object" {
@@ -197,8 +206,8 @@ pub func build_theme(cfg: json) -> report.Theme {
                             names = vec.push(names, k)
                             specs = vec.push(specs, json.as_str(v))
                         }
-                    },
-                    .err(_) => noop(),
+                    }
+                    .err(_) => noop()
                 }
             }
         }
