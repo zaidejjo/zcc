@@ -208,9 +208,11 @@ the demo above).
 Cold recounts fan out over green threads (`task.spawn` + `join`,
 one chunk per core, ≥32 misses) with byte-identical output;
 small trees stay serial and warm cache stays single-threaded.
-`--no-cache` numbers are the honest cold metric. Remaining cold gap
-vs tokei is per-byte allocator pressure, not parallelism —
-see `src/parallel.zz` design notes.
+`--no-cache` numbers are the honest cold metric. Walk fans out over
+top-level subdirs the same way. A zero-alloc byte counter was prototyped
+and reverted: ZZ-level per-byte loops cost more than the native C `str`
+ops they replaced (measured 86ms vs 32ms on one 322KB file) — that gap
+needs upstream primitives (`str.bytes`, `str.find`, see zz#276).
 
 ## License
 
