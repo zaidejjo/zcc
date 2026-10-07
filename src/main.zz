@@ -2,7 +2,7 @@
 // Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
-// (Upstream cache-invalidation bug; entry rev 25.)
+// (Upstream cache-invalidation bug; entry rev 26.)
 import std.fs
 import std.json
 import std.str
@@ -245,7 +245,15 @@ func run_single(path: str, only: str, out_json: bool) {
 
 func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int) {
     pats := walker.load_patterns(root)
-    files := walker.walk_files(root, pats, use_ignore, include_hidden)
+    // Worker budget shared by walk fan-out and count fan-out below.
+    nworkers := sys.cpu_count()
+    if nworkers < 1 {
+        nworkers = 1
+    }
+    if nworkers > parallel.worker_cap() {
+        nworkers = parallel.worker_cap()
+    }
+    files := walker.walk_files_par(root, pats, use_ignore, include_hidden, nworkers)
     cfg := config.load_config()
     th := config.build_theme(cfg)
     table := config.lang_table_with(cfg)
@@ -365,35 +373,27 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     // cost more than they save); big cold trees fan out over green
     // threads, one chunk per worker, joined in order (deterministic).
     if misses > 0 && misses < parallel.par_threshold() {
-        for k in 0..len(mpaths) {
-            // Single read per file: strict UTF-8 read rejects non-UTF8
-            // binaries; has_nul catches the rest.
-            match fs.read_to_string(mpaths[k]) {
-                .ok(text) => {
-                    if walker.has_nul(text) {
-                        continue
-                    }
-                    markers := parallel.split_markers(mjoined[k])
-                    c := counter.count_content_with(text, mlangs[k], markers, mbstart[k], mbend[k])
-                    t = report.add_row(t, mshows[k], 1, c.lines, c.code, c.comments, c.blanks)
-                    counted = counted + 1
-                    if by_file {
-                        p := fpos[k]
-                        flines[p] = c.lines
-                        fcode[p] = c.code
-                        fcomments[p] = c.comments
-                        fblanks[p] = c.blanks
-                    }
-                    fenc := ""
-                    if mlangs[k] == "Markdown" && mshows[k] == "Markdown" {
-                        fenc = parallel.fence_enc(text)
-                        emb = cache.merge_emb_enc(emb, fenc)
-                    }
-                    if use_cache {
-                        saverows = vec.push(saverows, cache.enc_entry(mpaths[k], msig0[k], msig1[k], mshows[k], c.lines, c.code, c.comments, c.blanks, fenc))
-                    }
-                }
-                .err(_) => noop()
+        // Same worker body, called directly: no spawn overhead, one
+        // counting implementation for both paths.
+        res := parallel.count_files(mpaths, mlangs, mshows, mjoined, mbstart, mbend, 0, len(mpaths))
+        for j in 0..len(res.oks) {
+            if res.oks[j] == 0 {
+                continue
+            }
+            t = report.add_row(t, mshows[j], 1, res.lines[j], res.code[j], res.comments[j], res.blanks[j])
+            counted = counted + 1
+            if by_file {
+                p := fpos[j]
+                flines[p] = res.lines[j]
+                fcode[p] = res.code[j]
+                fcomments[p] = res.comments[j]
+                fblanks[p] = res.blanks[j]
+            }
+            if mlangs[j] == "Markdown" && mshows[j] == "Markdown" {
+                emb = cache.merge_emb_enc(emb, res.fencs[j])
+            }
+            if use_cache {
+                saverows = vec.push(saverows, cache.enc_entry(mpaths[j], msig0[j], msig1[j], mshows[j], res.lines[j], res.code[j], res.comments[j], res.blanks[j], res.fencs[j]))
             }
         }
     }
@@ -401,13 +401,6 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         // One chunk per core: warm runs are CPU-bound and chunky enough
         // that this is the sweet spot; cold runs still overlap IO because
         // blocking reads park a worker while the pool tops itself up.
-        nworkers := sys.cpu_count()
-        if nworkers < 1 {
-            nworkers = 1
-        }
-        if nworkers > parallel.worker_cap() {
-            nworkers = parallel.worker_cap()
-        }
         if nworkers > misses {
             nworkers = misses
         }
