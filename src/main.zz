@@ -291,6 +291,12 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     mbstart := []
     mbend := []
     fpos := []
+    // Per-lang rule memo: ~30 distinct langs over hundreds of files;
+    // skips the repeated customs scan + table lookups per file.
+    memo_lang := []
+    memo_joined := []
+    memo_b0 := []
+    memo_b1 := []
     for f in files {
         // Cheap string-only checks first: zero IO for unknown/filtered-out.
         lang := languages.resolve_fast(em, f)
@@ -343,16 +349,30 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         mshows = vec.push(mshows, show)
         msig0 = vec.push(msig0, sig[0])
         msig1 = vec.push(msig1, sig[1])
-        rules := languages.resolve_markers(table, lang, customs)
-        mjoined = vec.push(mjoined, str.join(rules[0], "\x01"))
+        mj := ""
         b0 := ""
         b1 := ""
-        if len(rules[1]) > 0 {
-            b0 = rules[1][0]
+        rule_hit := false
+        for q in 0..len(memo_lang) {
+            if memo_lang[q] == lang {
+                mj = memo_joined[q]
+                b0 = memo_b0[q]
+                b1 = memo_b1[q]
+                rule_hit = true
+                break
+            }
         }
-        if len(rules[2]) > 0 {
-            b1 = rules[2][0]
+        if !rule_hit {
+            rules := languages.resolve_markers(table, lang, customs)
+            mj = str.join(rules[0], "\x01")
+            b0 = rule_str(rules[1])
+            b1 = rule_str(rules[2])
+            memo_lang = vec.push(memo_lang, lang)
+            memo_joined = vec.push(memo_joined, mj)
+            memo_b0 = vec.push(memo_b0, b0)
+            memo_b1 = vec.push(memo_b1, b1)
         }
+        mjoined = vec.push(mjoined, mj)
         mbstart = vec.push(mbstart, b0)
         mbend = vec.push(mbend, b1)
         // Placeholder row keeps walk order: counts filled in phase 2.
