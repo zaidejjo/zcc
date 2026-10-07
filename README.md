@@ -209,10 +209,13 @@ Cold recounts fan out over green threads (`task.spawn` + `join`,
 one chunk per core, ≥32 misses) with byte-identical output;
 small trees stay serial and warm cache stays single-threaded.
 `--no-cache` numbers are the honest cold metric. Walk fans out over
-top-level subdirs the same way. A zero-alloc byte counter was prototyped
-and reverted: ZZ-level per-byte loops cost more than the native C `str`
-ops they replaced (measured 86ms vs 32ms on one 322KB file) — that gap
-needs upstream primitives (`str.bytes`, `str.find`, see zz#276).
+top-level subdirs the same way. Two counter rewrites were prototyped
+against the new `str.find`/`trim_span` primitives and reverted, both
+measured slower: per-line native calls + allocs exceeded what they
+saved (offset core 3.5x slower on 8MB; per-file profiling isolated
+unbounded scans, fixed upstream as `find_in`/`rfind_in`/`count_in`).
+Remaining gap is per-call overhead, not algorithms — needs either
+bulk native classification or cheaper calls (see zz#280).
 
 ## License
 
