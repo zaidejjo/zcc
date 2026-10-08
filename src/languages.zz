@@ -357,7 +357,7 @@ pub func line_markers(lang: str) -> [str] {
 }
 
 pub func block_pair(lang: str) -> [str] {
-    if lang == "Html" || lang == "Xml" || lang == "Svg" || lang == "Vue" || lang == "Svelte" {
+    if lang == "Html" || lang == "Xml" || lang == "Svg" || lang == "Vue" || lang == "Svelte" || lang == "Astro" {
         return ["<!--", "-->"]
     }
     if lang == "Css" {
