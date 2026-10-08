@@ -417,6 +417,28 @@ pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool)
     println(bar)
 }
 
+// Languages whose bodies extract embedded child rows (Markdown fences,
+// component islands, notebook cells). Single predicate so the parallel
+// worker, both mergers, and tests agree.
+
+pub func has_emb(lang: str) -> bool {
+    lang == "Markdown" || lang == "Astro" || lang == "Vue" || lang == "Svelte" || lang == "Mdx" || lang == "Jupyter"
+}
+
+// Drop one language's rows (for --no-generated). Totals recompute
+// downstream, so the table stays balanced.
+
+pub func filter_lang(t: Table, drop: str) -> Table {
+    out := new_table()
+    for i in 0..len(t.langs) {
+        if t.langs[i] == drop {
+            continue
+        }
+        out = add_row(out, t.langs[i], t.files[i], t.lines[i], t.code[i], t.comments[i], t.blanks[i])
+    }
+    out
+}
+
 // Display prefix ("└ Rust") back to the language name for override
 // lookup. Byte-safe: splits on ASCII space, never slices multibyte.
 

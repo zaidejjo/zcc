@@ -486,6 +486,9 @@ pub func markdown_fences(content: str) -> [str] {
                 if tag == "astro" {
                     tag = "Astro"
                 }
+                if tag == "zz" {
+                    tag = "ZZ"
+                }
                 cur_lang = tag
                 in_fence = true
             }
