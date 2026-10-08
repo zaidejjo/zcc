@@ -73,6 +73,18 @@ jobs:
           mkdir -p dist "zcc-$VERSION"
           cp src/bin/main "zcc-$VERSION/zcc"
           cp README.md LICENSE config.example.json config.example-zz.json "zcc-$VERSION/"
+          # Bundle every non-system shared lib the AOT binary needs
+          # (Rust libstd from the toolchain; system libs stay system).
+          # The AUR wrapper puts this dir on the loader path.
+          mkdir -p "zcc-$VERSION/lib"
+          ldd "zcc-$VERSION/zcc" | awk '/=> \// {print $3}' | while read -r lib; do
+            case "$lib" in
+              /usr/lib*|/lib*|/lib64*) ;;
+              *) cp -L "$lib" "zcc-$VERSION/lib/" && echo "bundled: $lib" ;;
+            esac
+          done
+          ls "zcc-$VERSION/lib"
+          cp packaging/zcc-wrapper.sh "zcc-$VERSION/zcc-wrapper.sh"
           tar -czf "dist/zcc-$VERSION-linux-x86_64.tar.gz" -C "zcc-$VERSION" .
           git archive --format=tar.gz --prefix="zcc-$VERSION/" -o "dist/zcc-$VERSION-src.tar.gz" HEAD
           # NOTE: git archive captures the *tag* tree (unstamped version);
