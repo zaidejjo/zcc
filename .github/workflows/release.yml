@@ -51,17 +51,8 @@ jobs:
           sed -i "s/^version = \"0\.1\.0\"$/version = \"$VERSION\"/" zcc/zz.toml
           grep -n "\"$VERSION\"" zcc/src/main.zz zcc/zz.toml
 
-      - name: Checkout zz workspace (native runtime link)
-        # Same as ci.yml: the 0.2.0+ toolchain needs the Rust workspace
-        # at native-link time (see ZZ_NATIVE_RT_DIR below).
-        run: |
-          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
-          git clone --depth 1 --branch "v$ZZVER" https://github.com/zaidejjo/zz.git zz-src
-
       - name: Test + release build
         working-directory: zcc
-        env:
-          ZZ_NATIVE_RT_DIR: ${{ github.workspace }}/zz-src
         run: |
           zz test
           zz build -p src/main.zz

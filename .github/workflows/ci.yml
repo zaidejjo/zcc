@@ -36,18 +36,8 @@ jobs:
         working-directory: zcc
         run: zz test
 
-      - name: Checkout zz workspace (native runtime link)
-        # The 0.2.0+ toolchain links the Rust native runtime at native-build
-        # time and locates its workspace via ZZ_NATIVE_RT_DIR; the prebuilt
-        # zip ships binaries only, so check out the matching sources.
-        run: |
-          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
-          git clone --depth 1 --branch "v$ZZVER" https://github.com/zaidejjo/zz.git zz-src
-
       - name: Release build
         working-directory: zcc
-        env:
-          ZZ_NATIVE_RT_DIR: ${{ github.workspace }}/zz-src
         run: zz build -p src/main.zz
 
       - name: Smoke test
