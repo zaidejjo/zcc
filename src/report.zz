@@ -532,14 +532,14 @@ pub func escape_json(s: str) -> str {
     e
 }
 
-pub func to_json(t: Table) -> str {
-    "{" + json_tables(t) + "}"
+pub func to_json(t: Table, emb: Table) -> str {
+    "{" + json_tables(t) + json_emb(emb) + "}"
 }
 
 // Same document plus a top-n files array (for --by-file).
 
-pub func to_json_full(t: Table, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int) -> str {
-    out:str = "{" + json_tables(t)
+pub func to_json_full(t: Table, emb: Table, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int) -> str {
+    out:str = "{" + json_tables(t) + json_emb(emb)
     idx := top_by_lines(lines, topn)
     out = out + ",\"files\":["
     first:bool = true
@@ -573,5 +573,25 @@ func json_tables(t: Table) -> str {
         out = out + "\"{lang}\":{\"files\":{t.files[i]},\"lines\":{t.lines[i]},\"code\":{t.code[i]},\"comments\":{t.comments[i]},\"blanks\":{t.blanks[i]}}"
     }
     out = out + "},\"total\":{\"files\":{tot[0]},\"lines\":{tot[1]},\"code\":{tot[2]},\"comments\":{tot[3]},\"blanks\":{tot[4]}}"
+    out
+}
+
+func json_emb(emb: Table) -> str {
+    t := new_table()
+    for i in 0..len(emb.langs) {
+        t = add_row(t, emb_base_lang(emb.langs[i]), emb.files[i], emb.lines[i], emb.code[i], emb.comments[i], emb.blanks[i])
+    }
+    t = sort_table(t, "code", false)
+    out:str = ",\"embedded\":{"
+    first:bool = true
+    for i in 0..len(t.langs) {
+        if !first {
+            out = out + ","
+        }
+        first = false
+        lang := escape_json(t.langs[i])
+        out = out + "\"{lang}\":{\"files\":{t.files[i]},\"lines\":{t.lines[i]},\"code\":{t.code[i]},\"comments\":{t.comments[i]},\"blanks\":{t.blanks[i]}}"
+    }
+    out = out + "}"
     out
 }
