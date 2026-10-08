@@ -755,3 +755,44 @@ func str_contains(s: str, sub: str) -> bool {
     }
     false
 }
+
+@test
+func test_astro_basic() {
+    src := "---\ntitle: hi\n---\n<!-- comment -->\n<h1>{{x}}</h1>\n<style>\n.a { color: red; }\n</style>\n<script>\nlet y = 1; // init\n</script>\n<p>done</p>\n"
+    c := counter.count_content(src, "Astro")
+    assert_eq(c.lines, 12)
+    assert_eq(c.code, 9)
+    assert_eq(c.comments, 3)
+    assert_eq(c.blanks, 0)
+}
+
+@test
+func test_astro_embeds() {
+    src := "---\ntitle: hi\n---\n<p>x</p>\n<style>\n.a { color: red; }\n</style>\n"
+    e := counter.astro_embeds(src)
+    assert_eq(len(e), 2)
+    langs := str.split(e[0], "\x01")
+    assert_eq(len(langs), 2)
+    assert_eq(langs[0], "Yaml")
+    assert_eq(langs[1], "Css")
+    enc := parallel.astro_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(report.totals(t)[0], 2)
+}
+
+@test
+func test_sort_keys() {
+    t := report.new_table()
+    t = report.add_row(t, "A", 1, 30, 10, 5, 1)
+    t = report.add_row(t, "B", 5, 10, 20, 1, 1)
+    s := report.sort_table(t, "code", false)
+    assert_eq(s.langs[0], "B")
+    s = report.sort_table(t, "files", false)
+    assert_eq(s.langs[0], "B")
+    s = report.sort_table(t, "lines", true)
+    assert_eq(s.langs[0], "B")
+    assert_eq(report.display_name("Css"), "CSS")
+    assert_eq(report.display_name("Json"), "JSON")
+    assert_eq(report.display_name("Rust"), "Rust")
+}

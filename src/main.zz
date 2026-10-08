@@ -43,6 +43,8 @@ func print_help() {
     println("    --no-ignore         skip .gitignore rules (still skips .git)")
     println("    --no-cache          skip the count cache (always recount)")
     println("    --only LANG         count only this language (e.g. Rust)")
+    println("    --sort KEY          sort table by code|lines|files|comments|blanks (default code, desc; prefix - for asc)")
+    println("    --reverse           ascending sort order")
     println("    --force             with init: overwrite existing config")
     println("    --by-file           list top files by lines after the table")
     println("    --top N             files shown with --by-file (default 20)")
@@ -78,6 +80,8 @@ func main(cli_args: [str]) {
     by_file := false
     topn := 20
     top_next := false
+    sort := "code"
+    rev := false
     only := ""
     show_help := false
     show_ver := false
@@ -145,6 +149,26 @@ func main(cli_args: [str]) {
         if a == "json" && out_json {
             continue
         }
+        if str.starts_with(a, "--sort=") {
+            parts := str.split(a, "=")
+            if len(parts) > 1 {
+                v := parts[1]
+                if str.starts_with(v, "-") {
+                    rev = true
+                    v = v[1:]
+                }
+                if v == "code" || v == "lines" || v == "files" || v == "comments" || v == "blanks" {
+                    sort = v
+                } else {
+                    println("unknown --sort key: {v} (code|lines|files|comments|blanks)")
+                }
+            }
+            continue
+        }
+        if a == "--reverse" {
+            rev = true
+            continue
+        }
         if str.starts_with(a, "--only=") {
             parts := str.split(a, "=")
             if len(parts) > 1 {
@@ -205,7 +229,7 @@ func main(cli_args: [str]) {
         println("zcc: path not found: {root}")
         return
     }
-    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn)
+    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn, sort, rev)
 }
 
 func run_single(path: str, only: str, out_json: bool) {
@@ -243,7 +267,7 @@ func run_single(path: str, only: str, out_json: bool) {
     }
 }
 
-func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int) {
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int, sort: str, rev: bool) {
     pats := walker.load_patterns(root)
     // Worker budget shared by walk fan-out and count fan-out below.
     nworkers := sys.cpu_count()
@@ -409,7 +433,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 fcomments[p] = res.comments[j]
                 fblanks[p] = res.blanks[j]
             }
-            if mlangs[j] == "Markdown" && mshows[j] == "Markdown" {
+            if (mlangs[j] == "Markdown" || mlangs[j] == "Astro") && mshows[j] == mlangs[j] {
                 emb = cache.merge_emb_enc(emb, res.fencs[j])
             }
             if use_cache {
@@ -462,7 +486,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                     fcomments[p] = res.comments[j]
                     fblanks[p] = res.blanks[j]
                 }
-                if mlangs[idx] == "Markdown" && mshows[idx] == "Markdown" {
+                if (mlangs[idx] == "Markdown" || mlangs[idx] == "Astro") && mshows[idx] == mlangs[idx] {
                     emb = cache.merge_emb_enc(emb, res.fencs[j])
                 }
                 if use_cache {
@@ -491,7 +515,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
             println(report.to_json(t))
         }
     } else {
-        report.print_table_full(t, emb, th)
+        report.print_table_full(t, emb, th, sort, rev)
         if by_file {
             report.print_files_section(root, fpaths, flangs, flines, fcode, fcomments, fblanks, topn, th)
         }

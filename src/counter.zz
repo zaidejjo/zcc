@@ -54,6 +54,9 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
     if lang == "Markdown" {
         return count_markdown(content)
     }
+    if lang == "Astro" {
+        return count_astro(content)
+    }
     nested := lang == "Rust" || lang == "Swift" || lang == "Julia"
     whole := lang == "Ruby" || lang == "Perl"
     r := str.classify(content, markers, bstart, bend, nested, whole)
@@ -106,6 +109,156 @@ pub func count_markdown(content: str) -> Counts {
     c
 }
 
+// Astro: frontmatter (---) + <style>/<script> islands extract to child
+// rows (like Markdown fences); markup classifies with HTML comment
+// rules. Frontmatter delimiters count as comments, island bodies as
+// code here for line balance, re-attributed by the caller via
+// astro_embeds. Single-line islands (`<style>x</style>`) stay markup.
+
+pub func count_astro(content: str) -> Counts {
+    c := zero()
+    lines := split_lines(content)
+    in_front := false
+    front_done := false
+    in_style := false
+    in_script := false
+    for raw in lines {
+        c.lines = c.lines + 1
+        if raw == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        t := str.trim(raw)
+        if t == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        if t == "---" && !front_done && !in_front {
+            in_front = true
+            c.comments = c.comments + 1
+            continue
+        }
+        if t == "---" && in_front {
+            in_front = false
+            front_done = true
+            c.comments = c.comments + 1
+            continue
+        }
+        if in_front {
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "<style") {
+            in_style = true
+            if str.contains(t, "</style>") {
+                in_style = false
+            }
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "</style>") {
+            in_style = false
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "<script") {
+            in_script = true
+            if str.contains(t, "</script>") {
+                in_script = false
+            }
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "</script>") {
+            in_script = false
+            c.code = c.code + 1
+            continue
+        }
+        if in_style || in_script {
+            c.code = c.code + 1
+            continue
+        }
+        // Markup line: HTML comment rules, one native call.
+        r := str.classify(raw, [], "<!--", "-->", false, false)
+        c.code = c.code + r[1]
+        c.comments = c.comments + r[2]
+    }
+    c.files = 1
+    c
+}
+
+// Extract Astro embedded bodies: frontmatter -> Yaml, <style> -> Css,
+// <script> -> TypeScript. Same \x01/\x02 protocol as markdown_fences.
+
+pub func astro_embeds(content: str) -> [str] {
+    langs := []
+    bodies := []
+    lines := split_lines(content)
+    in_front := false
+    front_done := false
+    in_style := false
+    in_script := false
+    cur := ""
+    for raw in lines {
+        t := str.trim(raw)
+        if t == "---" && !front_done && !in_front {
+            in_front = true
+            cur = ""
+            continue
+        }
+        if t == "---" && in_front {
+            in_front = false
+            front_done = true
+            langs = vec.push(langs, "Yaml")
+            bodies = vec.push(bodies, cur)
+            cur = ""
+            continue
+        }
+        if in_front {
+            cur = cur + raw + "\n"
+            continue
+        }
+        if str.starts_with(t, "<style") {
+            if str.contains(t, "</style>") {
+                continue
+            }
+            in_style = true
+            cur = ""
+            continue
+        }
+        if str.starts_with(t, "</style>") {
+            in_style = false
+            langs = vec.push(langs, "Css")
+            bodies = vec.push(bodies, cur)
+            cur = ""
+            continue
+        }
+        if str.starts_with(t, "<script") {
+            if str.contains(t, "</script>") {
+                continue
+            }
+            in_script = true
+            cur = ""
+            continue
+        }
+        if str.starts_with(t, "</script>") {
+            in_script = false
+            langs = vec.push(langs, "TypeScript")
+            bodies = vec.push(bodies, cur)
+            cur = ""
+            continue
+        }
+        if in_style || in_script {
+            cur = cur + raw + "\n"
+            continue
+        }
+    }
+    out := []
+    out = vec.push(out, str.join(langs, "\x01"))
+    out = vec.push(out, str.join(bodies, "\x02"))
+    out
+}
+
 // Extract fenced blocks: returns parallel arrays [lang, body].
 
 pub func markdown_fences(content: str) -> [str] {
@@ -147,6 +300,9 @@ pub func markdown_fences(content: str) -> [str] {
                 }
                 if tag == "ts" || tag == "typescript" {
                     tag = "TypeScript"
+                }
+                if tag == "astro" {
+                    tag = "Astro"
                 }
                 cur_lang = tag
                 in_fence = true

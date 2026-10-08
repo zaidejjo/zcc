@@ -1,5 +1,6 @@
 {
   "Assembly": { "extensions": ["asm", "s", "S"], "files": [], "line": [";", "#", "//"], "block_start": ["/*"], "block_end": ["*/"] },
+  "Astro": { "extensions": ["astro"], "files": [], "line": [], "block_start": ["<!--"], "block_end": ["-->"] },
   "AutoHotKey": { "extensions": ["ahk", "ahkl"], "files": [], "line": [";"], "block_start": ["/*"], "block_end": ["*/"] },
   "Bash": { "extensions": ["sh", "bash"], "files": [".bashrc", ".bash_profile", "PKGBUILD"], "line": ["#"], "block_start": [": '"], "block_end": ["'"] },
   "C": { "extensions": ["c"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
