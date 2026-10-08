@@ -276,7 +276,7 @@ func test_top_by_lines() {
 func test_files_json_shape() {
     t := report.new_table()
     t = report.add_row(t, "Rust", 1, 10, 7, 2, 1)
-    j := report.to_json_full(t, ["a.rs", "b.rs"], ["Rust", "Rust"], [10, 3], [7, 3], [2, 0], [1, 0], 5)
+    j := report.to_json_full(t, report.new_table(), ["a.rs", "b.rs"], ["Rust", "Rust"], [10, 3], [7, 3], [2, 0], [1, 0], 5)
     assert(str_contains(j, "\"files\":["))
     assert(str_contains(j, "a.rs"))
     assert(str_contains(j, "\"language\":\"Rust\""))
@@ -285,12 +285,21 @@ func test_files_json_shape() {
         .ok(_) => walker.noop()
         .err(_) => fail("to_json_full is not valid JSON")
     }
-    match json.parse(report.to_json(t)) {
+    match json.parse(report.to_json(t, report.new_table())) {
         .ok(_) => walker.noop()
         .err(_) => fail("to_json is not valid JSON")
     }
     // plain json unchanged (no files key)
-    assert(!str_contains(report.to_json(t), "\"files\":["))
+    assert(!str_contains(report.to_json(t, report.new_table()), "\"files\":["))
+    // embedded rows export under "embedded" with stripped lang names
+    e := report.new_table()
+    e = report.add_row(e, "└ BASH", 1, 20, 17, 0, 3)
+    j2 := report.to_json(t, e)
+    assert(str_contains(j2, "\"embedded\":{\"BASH\""))
+    match json.parse(j2) {
+        .ok(_) => walker.noop()
+        .err(_) => fail("to_json embedded is not valid JSON")
+    }
 }
 
 @test
@@ -596,7 +605,7 @@ func test_ignore_match() {
 func test_report_json() {
     t := report.new_table()
     t = report.add_row(t, "Rust", 2, 10, 7, 2, 1)
-    j := report.to_json(t)
+    j := report.to_json(t, report.new_table())
     assert(str_contains(j, "Rust"))
     assert(str_contains(j, "total"))
 }

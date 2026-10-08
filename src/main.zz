@@ -258,7 +258,7 @@ func run_single(path: str, only: str, out_json: bool) {
             t := report.new_table()
             t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
             if out_json {
-                println(report.to_json(t))
+                println(report.to_json(t, report.new_table()))
             } else {
                 report.print_table(t, th)
             }
@@ -510,9 +510,9 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     }
     if out_json {
         if by_file {
-            println(report.to_json_full(t, fpaths, flangs, flines, fcode, fcomments, fblanks, topn))
+            println(report.to_json_full(t, emb, fpaths, flangs, flines, fcode, fcomments, fblanks, topn))
         } else {
-            println(report.to_json(t))
+            println(report.to_json(t, emb))
         }
     } else {
         report.print_table_full(t, emb, th, sort, rev)
