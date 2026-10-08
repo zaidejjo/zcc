@@ -981,3 +981,36 @@ func test_walk_adversarial() {
         .err(_) => walker.noop()
     }
 }
+
+@test
+func test_rooted_ignore() {
+    pats := ["/desktop/desktop", "/target", "*.log", "!keep.log"]
+    cps := walker.compile_pats(pats)
+    // exact file hit
+    assert(walker.match_pat("slash", "desktop/desktop", "", "desktop/desktop", "desktop"))
+    // ancestor dir descends (the desktop/ wipeout bug)
+    assert(!walker.match_pat("slash", "desktop/desktop", "", "desktop", "desktop"))
+    // unrelated deep path untouched
+    assert(!walker.match_pat("slash", "desktop/desktop", "", "desktop/frontend/src/main.tsx", "main.tsx"))
+    // rooted dir still prunes itself (dir-level check)
+    assert(walker.dir_pruned(cps, "target", "target"))
+    assert(!walker.dir_pruned(cps, "desktop", "desktop"))
+    // file under rooted dir ignored (negation-mode file check)
+    assert(walker.is_ignored_by("target/foo/x.rs", false, pats))
+    assert(walker.is_ignored_by("desktop/desktop", false, pats))
+    assert(!walker.is_ignored_by("desktop/frontend/src/main.tsx", false, pats))
+}
+
+@test
+func test_yaml_fence() {
+    src := "# Doc\n\n```yaml\nkey: value\n# comment\n```\n"
+    fenced := counter.markdown_fences(src)
+    langs := str.split(fenced[0], "\x01")
+    assert_eq(langs[0], "Yaml")
+    enc := parallel.fence_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(t.langs[0], "└ Yaml")
+    assert_eq(report.totals(t)[2], 1)
+    assert_eq(report.totals(t)[3], 1)
+}

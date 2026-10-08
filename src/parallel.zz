@@ -255,7 +255,7 @@ pub func fence_enc(text: str) -> str {
             disp = "BASH"
         }
         ec := counter.count_content(body, disp)
-        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" || disp == "Astro" || disp == "ZZ" {
+        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" || disp == "Astro" || disp == "ZZ" || disp == "Yaml" {
             hit := -1
             for q in 0..len(agg_lang) {
                 if agg_lang[q] == disp {

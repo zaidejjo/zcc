@@ -254,10 +254,12 @@ pub func compile_pats(pats: [str]) -> [[str]] {
             continue
         }
         if str.starts_with(pat, "/") {
-            slash_parts := str.split(pat, "/")
+            // Rooted pattern: match the exact root-relative path.
+            // (Previously only the first segment was kept, so
+            // `/desktop/desktop` pruned the whole `desktop/` tree.)
             inner := pat
-            if len(slash_parts) > 1 {
-                inner = slash_parts[1]
+            while str.starts_with(inner, "/") {
+                inner = inner[1:len(inner)]
             }
             kinds = vec.push(kinds, neg + "slash")
             pa = vec.push(pa, inner)
@@ -312,6 +314,11 @@ pub func match_pat(kind: str, a: str, b: str, rel: str, base: str) -> bool {
         return str.contains(base, a)
     }
     if kind == "slash" {
+        // Rooted pattern against the full path: exact hit, or anything
+        // beneath an ignored dir (negation mode descends everywhere, so
+        // files check themselves here). Ancestor dirs never match —
+        // `rel` shorter than `a` fails both tests — so `desktop/` still
+        // descends past `/desktop/desktop`.
         if rel == a {
             return true
         }
