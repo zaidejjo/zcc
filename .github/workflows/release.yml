@@ -92,12 +92,12 @@ jobs:
             "zcc-${{ env.VERSION }}-src.tar.gz" \
             sha256sums.txt
 
-      - name: Upload source tarball for AUR job
+      - name: Upload binary tarball for AUR job
         uses: actions/upload-artifact@v4
         with:
-          name: src-tarball
+          name: bin-tarball
           path: |
-            zcc/dist/zcc-${{ env.VERSION }}-src.tar.gz
+            zcc/dist/zcc-${{ env.VERSION }}-linux-x86_64.tar.gz
             zcc/dist/sha256sums.txt
 
   aur:
@@ -118,25 +118,19 @@ jobs:
           git config --global user.name "zcc-ci"
           git config --global user.email "zcc-ci@users.noreply.github.com"
 
-      - name: Fetch source tarball hash
+      - name: Fetch binary tarball hash
         uses: actions/download-artifact@v4
         with:
-          name: src-tarball
+          name: bin-tarball
           path: /tmp/artifacts
 
       - name: Render PKGBUILD + SRCINFO
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          SHA=$(awk "/zcc-$VERSION-src.tar.gz/ {print \$1}" /tmp/artifacts/sha256sums.txt)
-          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
-          test -n "$SHA" && test -n "$ZZVER"
-          # Hash the pinned prebuilt toolchain zip (same URL the PKGBUILD uses).
-          curl -fsSL "https://github.com/zaidejjo/zz/releases/download/v$ZZVER/zz-$ZZVER-linux-x86_64.zip" \
-            -o /tmp/zz-toolchain.zip
-          ZZSHA=$(sha256sum /tmp/zz-toolchain.zip | cut -d' ' -f1)
+          SHA=$(awk "/zcc-$VERSION-linux-x86_64.tar.gz/ {print \$1}" /tmp/artifacts/sha256sums.txt)
+          test -n "$SHA"
           mkdir -p aurpkg
-          sed -e "s/@PKGVER@/$VERSION/g" -e "s/@SHA256@/$SHA/g" \
-              -e "s/@ZZVER@/$ZZVER/g" -e "s/@ZZSHA@/$ZZSHA/g" \
+          sed -e "s/@PKGVER@/$VERSION/g" -e "s/@BINSHA@/$SHA/g" \
             zcc/packaging/aur/PKGBUILD.template > aurpkg/PKGBUILD
           rm -rf /tmp/buildpkg && mkdir -p /tmp/buildpkg
           cp aurpkg/PKGBUILD /tmp/buildpkg/PKGBUILD
