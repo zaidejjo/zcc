@@ -102,6 +102,18 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                     fenc = astro_enc(text)
                     noop()
                 }
+                if (langs[i] == "Vue" || langs[i] == "Svelte") && shows[i] == langs[i] {
+                    fenc = island_enc(text, false)
+                    noop()
+                }
+                if langs[i] == "Jupyter" && shows[i] == "Jupyter" {
+                    fenc = notebook_enc(text)
+                    noop()
+                }
+                if langs[i] == "Mdx" && shows[i] == "Mdx" {
+                    fenc = fence_enc(text)
+                    noop()
+                }
                 fencs = vec.push(fencs, fenc)
                 oks = vec.push(oks, 1)
             }
@@ -127,8 +139,12 @@ func noop() {
 // files-with-islands, not island spans).
 
 pub func astro_enc(text: str) -> str {
+    island_enc(text, true)
+}
+
+pub func island_enc(text: str, front: bool) -> str {
     rows := []
-    embeds := counter.astro_embeds(text)
+    embeds := counter.island_embeds(text, front)
     if len(embeds) != 2 {
         return ""
     }
@@ -181,6 +197,15 @@ pub func astro_enc(text: str) -> str {
         rows = vec.push(rows, "└ {agg_lang[q]}\x1f1\x1f{agg_lines[q]}\x1f{agg_code[q]}\x1f{agg_comments[q]}\x1f{agg_blanks[q]}")
     }
     str.join(rows, "\x1e")
+}
+
+pub func notebook_enc(text: str) -> str {
+    body := counter.notebook_source(text)
+    if body == "" {
+        return ""
+    }
+    ec := counter.count_content(body, "Python")
+    "└ Python\x1f1\x1f{ec.lines}\x1f{ec.code}\x1f{ec.comments}\x1f{ec.blanks}"
 }
 
 // Extract fenced-code rows from one Markdown body as a raw emb

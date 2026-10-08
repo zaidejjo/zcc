@@ -433,7 +433,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                 fcomments[p] = res.comments[j]
                 fblanks[p] = res.blanks[j]
             }
-            if (mlangs[j] == "Markdown" || mlangs[j] == "Astro") && mshows[j] == mlangs[j] {
+            if (mlangs[j] == "Markdown" || mlangs[j] == "Astro" || mlangs[j] == "Vue" || mlangs[j] == "Svelte" || mlangs[j] == "Mdx" || mlangs[j] == "Jupyter") && mshows[j] == mlangs[j] {
                 emb = cache.merge_emb_enc(emb, res.fencs[j])
             }
             if use_cache {
@@ -486,7 +486,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                     fcomments[p] = res.comments[j]
                     fblanks[p] = res.blanks[j]
                 }
-                if (mlangs[idx] == "Markdown" || mlangs[idx] == "Astro") && mshows[idx] == mlangs[idx] {
+                if (mlangs[idx] == "Markdown" || mlangs[idx] == "Astro" || mlangs[idx] == "Vue" || mlangs[idx] == "Svelte" || mlangs[idx] == "Mdx" || mlangs[idx] == "Jupyter") && mshows[idx] == mlangs[idx] {
                     emb = cache.merge_emb_enc(emb, res.fencs[j])
                 }
                 if use_cache {
