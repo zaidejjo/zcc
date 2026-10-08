@@ -32,12 +32,13 @@ pub struct ChunkOut {
     blanks: [int],
     fencs: [str],
     oks: [int],
+    gens: [int],
 }
 
 // Cross-module constructor (struct literals are same-module only).
 
-pub func new_chunk_out(lines: [int], code: [int], comments: [int], blanks: [int], fencs: [str], oks: [int]) -> ChunkOut {
-    ChunkOut{lines: lines, code: code, comments: comments, blanks: blanks, fencs: fencs, oks: oks}
+pub func new_chunk_out(lines: [int], code: [int], comments: [int], blanks: [int], fencs: [str], oks: [int], gens: [int]) -> ChunkOut {
+    ChunkOut{lines: lines, code: code, comments: comments, blanks: blanks, fencs: fencs, oks: oks, gens: gens}
 }
 
 // Cold runs below this many misses stay serial: spawn + snapshot costs
@@ -75,6 +76,7 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
     blanks := []
     fencs := []
     oks := []
+    gens := []
     for i in start..end {
         match fs.read_to_string(paths[i]) {
             .ok(text) => {
@@ -85,7 +87,12 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                     blanks = vec.push(blanks, 0)
                     fencs = vec.push(fencs, "")
                     oks = vec.push(oks, 0)
+                    gens = vec.push(gens, 0)
                     continue
+                }
+                gen := 0
+                if shows[i] != "Generated" && walker.is_generated_content(text) {
+                    gen = 1
                 }
                 markers := split_markers(mjoined[i])
                 c := counter.count_content_with(text, langs[i], markers, bstarts[i], bends[i])
@@ -116,6 +123,7 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                 }
                 fencs = vec.push(fencs, fenc)
                 oks = vec.push(oks, 1)
+                gens = vec.push(gens, gen)
             }
             .err(_) => {
                 lines = vec.push(lines, 0)
@@ -124,10 +132,11 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                 blanks = vec.push(blanks, 0)
                 fencs = vec.push(fencs, "")
                 oks = vec.push(oks, 0)
+                gens = vec.push(gens, 0)
             }
         }
     }
-    new_chunk_out(lines, code, comments, blanks, fencs, oks)
+    new_chunk_out(lines, code, comments, blanks, fencs, oks, gens)
 }
 
 func noop() {
@@ -246,7 +255,7 @@ pub func fence_enc(text: str) -> str {
             disp = "BASH"
         }
         ec := counter.count_content(body, disp)
-        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" || disp == "Astro" {
+        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" || disp == "Astro" || disp == "ZZ" {
             hit := -1
             for q in 0..len(agg_lang) {
                 if agg_lang[q] == disp {
