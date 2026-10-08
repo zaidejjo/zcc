@@ -897,3 +897,87 @@ func test_zz_fence() {
     assert_eq(t.langs[0], "└ ZZ")
     assert_eq(report.totals(t)[1], 2)
 }
+
+func write_file(path: str, body: str) {
+    match fs.write(path, body) {
+        .ok(_) => walker.noop()
+        .err(_) => fail("write " + path)
+    }
+}
+
+func has_path(files: [str], suffix: str) -> bool {
+    for f in files {
+        if str.ends_with(f, suffix) {
+            return true
+        }
+    }
+    false
+}
+
+@test
+func test_walk_adversarial() {
+    base := fs.join(env.temp_dir(), "zcc_adv_test")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    for d in ["a", "b", "sub/.git", "loop1", "loop2"] {
+        match fs.mkdir_all(fs.join(base, d)) {
+            .ok(_) => walker.noop()
+            .err(_) => fail("mkdir " + d)
+        }
+    }
+    write_file(fs.join(base, "a/a.rs"), "fn main() {}\n")
+    write_file(fs.join(base, "b/b.py"), "x = 1\n")
+    write_file(fs.join(base, "sub/inner.rs"), "fn f() {}\n")
+    write_file(fs.join(base, "sub/.git/config"), "[core]\n")
+    write_file(fs.join(base, ".hidden.rs"), "fn h() {}\n")
+    write_file(fs.join(base, ".gitignore"), "*.log\n!important.log\n")
+    write_file(fs.join(base, "app.log"), "noise\n")
+    write_file(fs.join(base, "important.log"), "keep\n")
+    // symlink loop + file link (posix only; absence skips link asserts)
+    links_ok := false
+    match process.run("ln", ["-s", fs.join(base, "loop2"), fs.join(base, "loop1/link")]) {
+        .ok(_) => {
+            match process.run("ln", ["-s", fs.join(base, "loop1"), fs.join(base, "loop2/link")]) {
+                .ok(_) => {
+                    match process.run("ln", ["-s", fs.join(base, "a/a.rs"), fs.join(base, "link.rs")]) {
+                        .ok(_) => {
+                            links_ok = true
+                        }
+                        .err(_) => walker.noop()
+                    }
+                }
+                .err(_) => walker.noop()
+            }
+        }
+        .err(_) => walker.noop()
+    }
+    pats := walker.load_patterns(base)
+    t0 := time.now_ms()
+    files := walker.walk_files(base, pats, true, false)
+    elapsed := time.now_ms() - t0
+    assert(elapsed < 30000)
+    assert(has_path(files, "a/a.rs"))
+    assert(has_path(files, "b/b.py"))
+    assert(has_path(files, "sub/inner.rs"))
+    assert(has_path(files, "important.log"))
+    assert(!has_path(files, "app.log"))
+    assert(!has_path(files, ".hidden.rs"))
+    assert(!has_path(files, ".git/config"))
+    if links_ok {
+        assert(has_path(files, "link.rs"))
+        // loop links terminate via depth cap: bounded total, no dup explosion
+        assert(len(files) < 40)
+    }
+    shown := walker.walk_files(base, pats, true, true)
+    assert(has_path(shown, ".hidden.rs"))
+    raw := walker.walk_files(base, pats, false, false)
+    assert(has_path(raw, "app.log"))
+    assert(has_path(raw, "important.log"))
+    assert(!has_path(raw, "sub/.git/config"))
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
