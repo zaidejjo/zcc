@@ -198,15 +198,30 @@ the demo above).
 
 ## Performance
 
-| Run | zz_lang tree (538 files) |
-|-----|--------------------------|
-| Warm cache | **~70ms** |
-| Cold recount | ~300ms |
-| `tokei` (warm) | ~88ms |
-| `scc` (warm) | ~59ms |
+| Run | zz_lang tree (770 countable files) |
+|-----|------------------------------------|
+| Warm cache | **~70ms** (no threads spawned) |
+| Cold recount, native classify | ~170ms page-warm |
+| Cold recount, parallel loop | ~320ms page-warm, ~2.7s true-cold |
+| Cold recount, serial | ~410ms page-warm, ~5.4s true-cold |
+| `tokei` | ~110ms page-warm, ~0.5s true-cold |
 
-Warm cache + pruning walk; startup floor is ~35ms. `--no-cache`
-numbers are the honest cold metric.
+Cold recounts fan out over green threads (`task.spawn` + `join`,
+one chunk per core, ≥32 misses) with byte-identical output;
+small trees stay serial and warm cache stays single-threaded.
+`--no-cache` numbers are the honest cold metric. Walk fans out over
+top-level subdirs the same way. Each file classifies in one
+`str.classify` native call (bulk Rust/C loop, one interpreter
+crossing per file) instead of a ZZ-level per-line loop — 1.9x the
+parallel loop, 2.4x serial, with identical totals. Two earlier
+rewrites against per-line `str.find`/`trim_span` primitives were
+reverted, both measured slower: per-line native calls + allocs
+exceeded what they saved (offset core 3.5x slower on 8MB; per-file
+profiling isolated unbounded scans, fixed upstream as
+`find_in`/`rfind_in`/`count_in`). Remaining ~1.5x gap to tokei is
+interpreter overhead per file plus features tokei lacks (fence
+tracking, Generated separation); closing it further means
+AOT-compiling zcc itself.
 
 ## License
 

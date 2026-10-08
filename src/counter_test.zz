@@ -1,15 +1,19 @@
 // zcc tests — run with `zz test`
-import counter
-import languages
-import walker
-import report
+import std.env
+import std.fs
+import std.json
+import std.process
+import std.str
+import std.time
+import std.vec
+
 import cache
 import config
-import std.time
-import std.fs
-import std.env
-import std.json
-import std.str
+import counter
+import languages
+import parallel
+import report
+import walker
 
 @test
 func test_split_lines() {
@@ -26,12 +30,12 @@ func test_big_project_ms() {
     // blowups like the split_lines infinite recursion (1.5GB hang).
     base := fs.join(env.temp_dir(), "zcc_perf_proj")
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
     match fs.mkdir_all(fs.join(base, "src")) {
-        .ok(_) => walker.noop(),
-        .err(e) => fail("mkdir: {e}"),
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
     }
     body := ""
     for i in 0..100 {
@@ -61,8 +65,8 @@ func test_big_project_ms() {
         }
         path := fs.join(fs.join(base, "src"), "mod" + str(i) + "." + ext)
         match fs.write(path, content) {
-            .ok(_) => walker.noop(),
-            .err(e) => fail("write: {e}"),
+            .ok(_) => walker.noop()
+            .err(e) => fail("write: {e}")
         }
     }
     files := walker.walk_files(base, [], true, false)
@@ -85,8 +89,8 @@ func test_big_project_ms() {
                 t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
                 counted = counted + 1
                 total_lines = total_lines + c.lines
-            },
-            .err(_) => walker.noop(),
+            }
+            .err(_) => walker.noop()
         }
     }
     elapsed := time.now_ms() - t0
@@ -96,8 +100,8 @@ func test_big_project_ms() {
     assert(total_lines > 3000)
     assert(elapsed < 60000)
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
 }
 
@@ -139,17 +143,17 @@ func test_inline_block_then_code() {
 func test_cache_roundtrip() {
     base := fs.join(env.temp_dir(), "zcc_cache_test")
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
     match fs.mkdir_all(fs.join(base, "src")) {
-        .ok(_) => walker.noop(),
-        .err(e) => fail("mkdir: {e}"),
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
     }
     path := fs.join(fs.join(base, "src"), "a.rs")
     match fs.write(path, "// hi\nfn f() {}\n") {
-        .ok(_) => walker.noop(),
-        .err(e) => fail("write: {e}"),
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
     }
     sig := cache.current_sig(path)
     assert(sig[0] != "")
@@ -180,12 +184,12 @@ func test_cache_roundtrip() {
     assert_eq(et.comments[0], 0)
     assert_eq(et.blanks[0], 1)
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
 }
 
@@ -193,24 +197,24 @@ func test_cache_roundtrip() {
 func test_cache_invalidate_on_edit() {
     base := fs.join(env.temp_dir(), "zcc_cache_inv")
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
     match fs.mkdir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(e) => fail("mkdir: {e}"),
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
     }
     path := fs.join(base, "b.py")
     match fs.write(path, "# one\n") {
-        .ok(_) => walker.noop(),
-        .err(e) => fail("write: {e}"),
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
     }
     sig1 := cache.current_sig(path)
     rows := [cache.enc_entry(path, sig1[0], sig1[1], "Python", 1, 0, 1, 0, "")]
     cache.save_cache(base, rows)
     match fs.write(path, "# one\n# two\nx = 1\n") {
-        .ok(_) => walker.noop(),
-        .err(e) => fail("rewrite: {e}"),
+        .ok(_) => walker.noop()
+        .err(e) => fail("rewrite: {e}")
     }
     sig2 := cache.current_sig(path)
     files := cache.load_files_obj(base)
@@ -219,8 +223,8 @@ func test_cache_invalidate_on_edit() {
     stale := cache.entry_str(e, "mtime") == sig2[0] && cache.entry_str(e, "size") == sig2[1]
     assert(!stale)
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
 }
 
@@ -278,12 +282,12 @@ func test_files_json_shape() {
     assert(str_contains(j, "\"language\":\"Rust\""))
     // both documents must be valid JSON (balanced braces regression)
     match json.parse(j) {
-        .ok(_) => walker.noop(),
-        .err(_) => fail("to_json_full is not valid JSON"),
+        .ok(_) => walker.noop()
+        .err(_) => fail("to_json_full is not valid JSON")
     }
     match json.parse(report.to_json(t)) {
-        .ok(_) => walker.noop(),
-        .err(_) => fail("to_json is not valid JSON"),
+        .ok(_) => walker.noop()
+        .err(_) => fail("to_json is not valid JSON")
     }
     // plain json unchanged (no files key)
     assert(!str_contains(report.to_json(t), "\"files\":["))
@@ -301,8 +305,8 @@ func test_emb_base_lang() {
 func test_init_config() {
     base := fs.join(env.temp_dir(), "zcc_init_test")
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
     dir := fs.join(base, "zcc")
     m1 := config.init_config(dir, false)
@@ -325,15 +329,15 @@ func test_init_config() {
                     assert_eq(report.theme_lang_color(th, "Zig"), "")
                     langs := config.custom_names(cfg)
                     assert_eq(len(langs), 0)
-                },
-                .err(_) => fail("written config must parse"),
+                }
+                .err(_) => fail("written config must parse")
             }
-        },
-        .err(_) => fail("written config must read"),
+        }
+        .err(_) => fail("written config must read")
     }
     match fs.remove_dir_all(base) {
-        .ok(_) => walker.noop(),
-        .err(_) => walker.noop(),
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
     }
 }
 
@@ -344,7 +348,7 @@ func test_theme_from_config() {
     assert_eq(th.header, "cyan")
     assert_eq(th.language, "green")
     assert_eq(report.theme_lang_color(th, "Rust"), "")
-    match json.parse("{\"display\": {\"color\": false, \"header\": \"#ff0000\", \"language\": \"255,0,0\", \"total\": \"red\", \"languages\": {\"Rust\": \"bright_blue\", \"Go\": \"notacolor\"}}}") {
+    match json.parse("{{\"display\": {{\"color\": false, \"header\": \"#ff0000\", \"language\": \"255,0,0\", \"total\": \"red\", \"languages\": {{\"Rust\": \"bright_blue\", \"Go\": \"notacolor\"}}}}}}") {
         .ok(cfg) => {
             t2 := config.build_theme(cfg)
             assert(!t2.color)
@@ -362,14 +366,14 @@ func test_theme_from_config() {
             assert_eq(report.apply_color(th, "", "x"), "x")
             assert(report.is_plain_lang(th, "Markdown"))
             assert(!report.is_plain_lang(th, "Rust"))
-        },
-        .err(_) => fail("config json must parse"),
+        }
+        .err(_) => fail("config json must parse")
     }
 }
 
 @test
 func test_custom_lang_end_to_end() {
-    match json.parse("{\"languages\": {\"MyLang\": {\"extensions\": [\"myl\"], \"files\": [\"Myfile\"], \"line\": [\"#\"], \"block_start\": [\"/*\"], \"block_end\": [\"*/\"]}}}") {
+    match json.parse("{{\"languages\": {{\"MyLang\": {{\"extensions\": [\"myl\"], \"files\": [\"Myfile\"], \"line\": [\"#\"], \"block_start\": [\"/*\"], \"block_end\": [\"*/\"]}}}}}}") {
         .ok(cfg) => {
             table := config.lang_table_with(cfg)
             em := languages.build_ext_map(table)
@@ -386,9 +390,109 @@ func test_custom_lang_end_to_end() {
             // builtin rules untouched by customs
             rr := languages.resolve_markers(table, "Rust", ["MyLang"])
             assert_eq(rr[0], ["//"])
-        },
-        .err(_) => fail("custom lang json must parse"),
+        }
+        .err(_) => fail("custom lang json must parse")
     }
+}
+
+@test
+func test_parallel_chunk_matches_serial() {
+    // count_files must equal the serial counter on every file kind
+    // (code, markdown fences, NUL binary, missing file) and honor
+    // sub-ranges. Guards the phase-2 fan-out without spawning tasks.
+    base := fs.join(env.temp_dir(), "zcc_par_test")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    match fs.mkdir_all(base) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    rsrc := "// hi\nfn f() {}\n"
+    psrc := "# c\nx = 1\n"
+    msrc := "# T\n\n```rust\nfn f() {}\n```\n"
+    bsrc := "ab\x00cd"
+    rp := fs.join(base, "a.rs")
+    pp := fs.join(base, "b.py")
+    mp := fs.join(base, "c.md")
+    bp := fs.join(base, "d.bin")
+    match fs.write(rp, rsrc) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    match fs.write(pp, psrc) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    match fs.write(mp, msrc) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    match fs.write(bp, bsrc) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    paths := [rp, pp, mp, bp, fs.join(base, "nope.rs")]
+    langs := ["Rust", "Python", "Markdown", "Rust", "Rust"]
+    shows := ["Rust", "Python", "Markdown", "Rust", "Rust"]
+    out := run_chunk(paths, langs, shows, 0, len(paths))
+    assert_eq(out.oks, [1, 1, 1, 0, 0])
+    bodies := [rsrc, psrc, msrc]
+    for k in 0..3 {
+        c := serial_count(bodies[k], langs[k])
+        assert_eq(out.lines[k], c.lines)
+        assert_eq(out.code[k], c.code)
+        assert_eq(out.comments[k], c.comments)
+        assert_eq(out.blanks[k], c.blanks)
+    }
+    assert_eq(out.fencs[2], parallel.fence_enc(msrc))
+    assert_eq(out.fencs[0], "")
+    sub := run_chunk(paths, langs, shows, 1, 3)
+    assert_eq(sub.lines[0], out.lines[1])
+    assert_eq(sub.lines[1], out.lines[2])
+    assert_eq(sub.oks, [1, 1])
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
+
+// Build worker inputs exactly like run_dir phase 1, then count.
+
+func run_chunk(paths: [str], langs: [str], shows: [str], start: int, end: int) -> parallel.ChunkOut {
+    mjoined := []
+    bstarts := []
+    bends := []
+    for i in 0..len(paths) {
+        lang := langs[i]
+        rules := languages.resolve_markers(json.null(), lang, [])
+        mjoined = vec.push(mjoined, str.join(rules[0], "\x01"))
+        b0 := ""
+        b1 := ""
+        if len(rules[1]) > 0 {
+            b0 = rules[1][0]
+        }
+        if len(rules[2]) > 0 {
+            b1 = rules[2][0]
+        }
+        bstarts = vec.push(bstarts, b0)
+        bends = vec.push(bends, b1)
+    }
+    parallel.count_files(paths, langs, shows, mjoined, bstarts, bends, start, end)
+}
+
+func serial_count(body: str, lang: str) -> counter.Counts {
+    rules := languages.resolve_markers(json.null(), lang, [])
+    b0 := ""
+    b1 := ""
+    if len(rules[1]) > 0 {
+        b0 = rules[1][0]
+    }
+    if len(rules[2]) > 0 {
+        b1 = rules[2][0]
+    }
+    counter.count_content_with(body, lang, rules[0], b0, b1)
 }
 
 @test
@@ -495,6 +599,145 @@ func test_report_json() {
     j := report.to_json(t)
     assert(str_contains(j, "Rust"))
     assert(str_contains(j, "total"))
+}
+
+@test
+func test_walk_par_matches_serial() {
+    // Parallel walk must list exactly what the serial walk lists,
+    // in the same order (nested dirs, hidden skips, ignore rules).
+    base := fs.join(env.temp_dir(), "zcc_walk_par")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    match fs.mkdir_all(fs.join(fs.join(base, "sub1"), "nested")) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    match fs.mkdir_all(fs.join(base, "sub2")) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    match fs.mkdir_all(fs.join(base, "target")) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    match fs.mkdir_all(fs.join(base, ".hidden")) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    files := ["f1.rs", "sub1/f2.py", "sub1/nested/f3.js", "sub2/f4.md", ".hidden/f5.rs", "target/f6.rs", "x.log"]
+    for f in files {
+        match fs.write(fs.join(base, f), "x\n") {
+            .ok(_) => walker.noop()
+            .err(e) => fail("write: {e}")
+        }
+    }
+    match fs.write(fs.join(base, ".gitignore"), "*.log\n") {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    pats := walker.load_patterns(base)
+    serial := walker.walk_files(base, pats, true, false)
+    assert_eq(len(serial), 4)
+    par := walker.walk_files_par(base, pats, true, false, 4)
+    assert_eq(par, serial)
+    par1 := walker.walk_files_par(base, pats, true, false, 1)
+    assert_eq(par1, serial)
+    parmany := walker.walk_files_par(base, pats, true, false, 64)
+    assert_eq(parmany, serial)
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
+
+@test
+func test_tokei_differential() {
+    // Curated fixtures where zcc and tokei semantics agree exactly.
+    // Skips (passes) when tokei is not installed.
+    have_tokei := false
+    match process.run("tokei", ["--version"]) {
+        .ok(_) => have_tokei = true
+        .err(_) => walker.noop()
+    }
+    if !have_tokei {
+        return
+    }
+    base := fs.join(env.temp_dir(), "zcc_tokei_diff")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    match fs.mkdir_all(base) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    match fs.write(fs.join(base, "a.rs"), "// hi\nfn f() {}\n\n") {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    match fs.write(fs.join(base, "b.py"), "# c\nx = 1\n") {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    match fs.write(fs.join(base, "c.c"), "/* b */\nint x;\n") {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    // zcc side
+    zlines := 0
+    zcode := 0
+    zcomments := 0
+    zblanks := 0
+    for f in ["a.rs", "b.py", "c.c"] {
+        lang := languages.detect_lang(f)
+        match fs.read_to_string(fs.join(base, f)) {
+            .ok(text) => {
+                c := counter.count_content(text, lang)
+                zlines = zlines + c.lines
+                zcode = zcode + c.code
+                zcomments = zcomments + c.comments
+                zblanks = zblanks + c.blanks
+            }
+            .err(_) => fail("read: {f}")
+        }
+    }
+    // tokei side
+    match process.run("tokei", ["--output", "json", base]) {
+        .ok(out) => {
+            if out[0] != 0 {
+                fail("tokei failed")
+            }
+            match json.parse(out[1]) {
+                .ok(root) => {
+                    match json.get(root, "Total") {
+                        .ok(total) => {
+                            match json.get(total, "code") {
+                                .ok(v) => assert_eq(json.as_int(v), zcode)
+                                .err(_) => fail("no tokei code")
+                            }
+                            match json.get(total, "comments") {
+                                .ok(v) => assert_eq(json.as_int(v), zcomments)
+                                .err(_) => fail("no tokei comments")
+                            }
+                            match json.get(total, "blanks") {
+                                .ok(v) => assert_eq(json.as_int(v), zblanks)
+                                .err(_) => fail("no tokei blanks")
+                            }
+                        }
+                        .err(_) => fail("no tokei Total")
+                    }
+                }
+                .err(_) => fail("tokei json must parse")
+            }
+        }
+        .err(_) => fail("tokei must run")
+    }
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
 }
 
 func str_contains(s: str, sub: str) -> bool {

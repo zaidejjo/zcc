@@ -1,16 +1,19 @@
 // zcc/src/report.zz — tokei-style table + JSON output.
+import std.colors
 import std.str
 import std.vec
-import std.colors
 
 pub func noop() {
+    
+    
 }
 
 // Local cell padding. NOTE: stdlib pad_right miscompiles in large AOT
 // programs (`needed` inferred bool → no padding; toolchain bug), so pad
 // here via native repeat with pinned int locals (no inferable temps).
+
 pub func pad_r(s: str, w: int) -> str {
-    n: int = len(s)
+    n:int = len(s)
     if n >= w {
         return s
     }
@@ -18,32 +21,40 @@ pub func pad_r(s: str, w: int) -> str {
 }
 
 pub func pad_l(s: str, w: int) -> str {
-    n: int = len(s)
+    n:int = len(s)
     if n >= w {
         return s
     }
     str.repeat(" ", w - n) + s
 }
 
-
 // Display theme: hues are specs resolved by apply_color — a color name
 // (green, cyan, bright_red, ...), "#rrggbb" / "#rgb" hex, or "r,g,b".
 // names/specs are per-language overrides ("Rust" -> "#ff5500").
-pub struct Theme { color: bool, header: str, language: str, total: str, names: [str], specs: [str] }
+
+pub struct Theme {
+    color: bool,
+    header: str,
+    language: str,
+    total: str,
+    names: [str],
+    specs: [str],
+}
 
 pub func default_theme() -> Theme {
-    Theme{ color: true, header: "cyan", language: "green", total: "cyan", names: [], specs: [] }
+    Theme{color: true, header: "cyan", language: "green", total: "cyan", names: [], specs: []}
 }
 
 // Cross-module constructor (struct literals are same-module only).
 // NOTE: branch on the flag with literal inits — initializing a bool
 // field directly from a bool parameter miscompiles in AOT
 // (`zz_bool(boxed)`; toolchain bug), so keep params out of struct inits.
+
 pub func make_theme(color: bool, header: str, language: str, total: str, names: [str], specs: [str]) -> Theme {
     if color {
-        return Theme{ color: true, header: header, language: language, total: total, names: names, specs: specs }
+        return Theme{color: true, header: header, language: language, total: total, names: names, specs: specs}
     }
-    Theme{ color: false, header: header, language: language, total: total, names: names, specs: specs }
+    Theme{color: false, header: header, language: language, total: total, names: names, specs: specs}
 }
 
 pub func theme_lang_color(th: Theme, lang: str) -> str {
@@ -130,6 +141,7 @@ pub func apply_color(th: Theme, spec: str, s: str) -> str {
 
 // Language cell: per-language override wins; Markdown/Text stay plain
 // unless explicitly overridden; otherwise the default language hue.
+
 pub func is_plain_lang(th: Theme, lang: str) -> bool {
     if theme_lang_color(th, lang) != "" {
         return false
@@ -156,10 +168,18 @@ pub func lang_cell(th: Theme, lang: str, cell: str) -> str {
 }
 
 // Aggregate rows: parallel arrays.
-pub struct Table { langs: [str], files: [int], lines: [int], code: [int], comments: [int], blanks: [int] }
+
+pub struct Table {
+    langs: [str],
+    files: [int],
+    lines: [int],
+    code: [int],
+    comments: [int],
+    blanks: [int],
+}
 
 pub func new_table() -> Table {
-    Table{ langs: [], files: [], lines: [], code: [], comments: [], blanks: [] }
+    Table{langs: [], files: [], lines: [], code: [], comments: [], blanks: []}
 }
 
 pub func find_lang(t: Table, lang: str) -> int {
@@ -193,6 +213,7 @@ pub func add_row(t: Table, lang: str, files: int, lines: int, code: int, comment
 }
 
 // Sort by code desc (bubble, n small).
+
 pub func sort_table(t: Table) -> Table {
     n := len(t.langs)
     i := 0
@@ -257,6 +278,7 @@ pub func print_table(t: Table, th: Theme) {
 // Full table: main languages, Total closes the table. Embedded
 // Markdown-fence code always gets its own section afterwards (inline
 // nesting breaks column alignment, so it never renders in-tree).
+
 pub func print_table_full(t: Table, emb: Table, th: Theme) {
     t = sort_table(t)
     tot := totals(t)
@@ -302,6 +324,7 @@ pub func print_table_full(t: Table, emb: Table, th: Theme) {
 
 // Display prefix ("└ Rust") back to the language name for override
 // lookup. Byte-safe: splits on ASCII space, never slices multibyte.
+
 pub func emb_base_lang(lang: str) -> str {
     if str.starts_with(lang, "└ ") {
         parts := str.split(lang, " ")
@@ -314,6 +337,7 @@ pub func emb_base_lang(lang: str) -> str {
 
 // Indices of the top-n rows by lines, descending. Partial pick-max:
 // O(n*k) scans, no full sort (n files, k shown).
+
 pub func top_by_lines(lines: [int], n: int) -> [int] {
     out := []
     if n <= 0 || len(lines) == 0 {
@@ -349,6 +373,7 @@ pub func top_by_lines(lines: [int], n: int) -> [int] {
 // Display path: trim to 44 columns with leading "..." (byte-safe: ASCII
 // dots + tail slice; paths are overwhelmingly ASCII, worst case a cut
 // multibyte char degrades one glyph, never errors).
+
 pub func display_path(p: str) -> str {
     if len(p) <= 44 {
         return p
@@ -438,6 +463,7 @@ pub func print_emb_section(emb: Table, th: Theme) {
 }
 
 // JSON export (--output json). Manual build for full control.
+
 pub func escape_json(s: str) -> str {
     e := str.replace(s, "\\", "\\\\")
     e = str.replace(e, "\"", "\\\"")
@@ -450,11 +476,12 @@ pub func to_json(t: Table) -> str {
 }
 
 // Same document plus a top-n files array (for --by-file).
+
 pub func to_json_full(t: Table, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int) -> str {
-    out: str = "{" + json_tables(t)
+    out:str = "{" + json_tables(t)
     idx := top_by_lines(lines, topn)
     out = out + ",\"files\":["
-    first: bool = true
+    first:bool = true
     for k in idx {
         if !first {
             out = out + ","
@@ -474,8 +501,8 @@ func json_tables(t: Table) -> str {
     // NOTE: explicit annotations — the AOT inferencer once resolved `out`
     // as bool here (order-dependent; printed "false"). Pinned until the
     // upstream inference bug is fixed.
-    out: str = "\"languages\":{"
-    first: bool = true
+    out:str = "\"languages\":{"
+    first:bool = true
     for i in 0..len(t.langs) {
         if !first {
             out = out + ","

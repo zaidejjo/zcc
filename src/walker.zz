@@ -2,13 +2,17 @@
 // Reads .gitignore / .ignore / .zccignore, filters walk_dir output.
 import std.fs
 import std.str
+import std.task
 import std.vec
 
 pub func noop() {
+    
+    
 }
 
 // Load patterns from root/.gitignore + .ignore + .zccignore.
 // Returns [patterns, negations] joined — negations prefixed with "!".
+
 pub func load_patterns(root: str) -> [str] {
     pats := []
     for fname in [".gitignore", ".ignore", ".zccignore"] {
@@ -28,8 +32,8 @@ pub func load_patterns(root: str) -> [str] {
                         pats = vec.push(pats, t)
                     }
                     noop()
-                },
-                .err(_) => noop(),
+                }
+                .err(_) => noop()
             }
         }
     }
@@ -38,6 +42,7 @@ pub func load_patterns(root: str) -> [str] {
 
 // Simple glob: supports *, **, trailing /, leading /.
 // Negation (!) handled by caller.
+
 pub func match_one(pattern: str, rel: str, isdir: bool) -> bool {
     if isdir {
         noop()
@@ -177,6 +182,7 @@ pub func is_ignored_by(rel: str, isdir: bool, pats: [str]) -> bool {
 // kinds: "empty" | "dir" | "star2" | "star" | "slash" | "plain",
 // negated kinds carry a "!" prefix ("!dir", ...). Parallel [str] arrays
 // only (no new types). Semantics mirror match_one branch-for-branch.
+
 pub func compile_pats(pats: [str]) -> [[str]] {
     kinds := []
     pa := []
@@ -340,6 +346,7 @@ pub func match_pat(kind: str, a: str, b: str, rel: str, base: str) -> bool {
 }
 
 // Strip one leading "!" marker kind (no multi-char split: AOT toolchain).
+
 pub func kind_split_rest(kind: str) -> str {
     if str.starts_with(kind, "!") && len(kind) > 1 {
         return kind[1:len(kind)]
@@ -369,6 +376,7 @@ pub func is_ignored_compiled(cps: [[str]], rel: str, base: str) -> bool {
 }
 
 // Always-skip dirs (unless --no-ignore): VCS, build, deps.
+
 pub func default_skip(name: str) -> bool {
     if name == ".git" || name == ".hg" || name == ".svn" {
         return true
@@ -389,6 +397,7 @@ pub func default_skip(name: str) -> bool {
 // into a separate "Generated" row, never into language totals. v1 is
 // filename/dir rules only (no content sniffing). Branched by extension
 // so ordinary sources exit after 2-3 cheap checks.
+
 pub func is_generated(path: str) -> bool {
     b := fs.basename(path)
     if b == "package-lock.json" || b == "yarn.lock" || b == "Gemfile.lock" {
@@ -436,6 +445,7 @@ pub func is_generated(path: str) -> bool {
 
 // Inside a generated/ tree everything counts generated (scanning
 // generated/ itself marks the whole subtree, which is honest).
+
 func gen_dir(path: str) -> bool {
     str.contains(path, "/generated/") || str.starts_with(path, "generated/")
 }
@@ -475,6 +485,7 @@ pub func rel_path(root: str, full: str) -> str {
 // skipped dirs, so junk paths cost one readdir entry instead of a stat +
 // rel splits + 27-pattern match each. Output order stays globally sorted
 // (read_dir is sorted; DFS pre-order over sorted siblings is sorted).
+
 pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bool) -> [str] {
     base := root
     if base == "" {
@@ -500,6 +511,7 @@ pub func walk_files(root: str, pats: [str], use_ignore: bool, include_hidden: bo
 
 // Depth cap: symlink-dir cycles would recurse forever (is_dir follows
 // links); 64 levels is plenty for real trees.
+
 pub func walk_rec(dir: str, rdir: str, cps: [[str]], use_ignore: bool, include_hidden: bool, has_neg: bool, depth: int) -> [str] {
     out := []
     if depth > 64 {
@@ -544,8 +556,8 @@ pub func walk_rec(dir: str, rdir: str, cps: [[str]], use_ignore: bool, include_h
                 out = vec.push(out, full)
             }
             noop()
-        },
-        .err(_) => noop(),
+        }
+        .err(_) => noop()
     }
     out
 }
@@ -556,6 +568,7 @@ pub func walk_rec(dir: str, rdir: str, cps: [[str]], use_ignore: bool, include_h
 // Single-"*" patterns are NOT child-closed ("x.log" matches "*.log"
 // while "x.log/y" doesn't), so they never prune. With negations present
 // nothing prunes (a later "!" could re-include children).
+
 pub func dir_pruned(cps: [[str]], crel: str, name: str) -> bool {
     kinds := cps[0]
     pa := cps[1]
@@ -578,11 +591,13 @@ pub func dir_pruned(cps: [[str]], crel: str, name: str) -> bool {
 // NUL check on already-read text: lets callers read each file ONCE
 // (read_to_string is strict UTF-8, so non-UTF8 binaries already fail
 // the read; NUL is valid UTF-8, so it needs this explicit check).
+
 pub func has_nul(s: str) -> bool {
     str.contains(s, "\x00")
 }
 
 // Binary sniff: NUL byte in first 8k => skip.
+
 pub func is_binary(path: str) -> bool {
     match fs.read_bytes(path) {
         .ok(b) => {
@@ -600,7 +615,143 @@ pub func is_binary(path: str) -> bool {
                 }
             }
             false
-        },
-        .err(_) => false,
+        }
+        .err(_) => false
     }
+}
+
+// Task cap for top-level walk fan-out (one task per subdir, extras and
+// shallow trees stay serial).
+
+pub func walk_task_cap() -> int {
+    8
+}
+
+// Parallel walk: the root level is listed on the main thread and each
+// top-level subdir is walked by a green-thread task running walk_rec.
+// Merge splices subdirectory results back in entry order, so output is
+// byte-identical to the serial walk (globally sorted pre-order).
+// Fewer than two walkable subdirs (or one worker) stays fully serial.
+
+pub func walk_files_par(root: str, pats: [str], use_ignore: bool, include_hidden: bool, tasks: int) -> [str] {
+    base := root
+    if base == "" {
+        base = "."
+    }
+    while len(base) > 1 && str.ends_with(base, "/") {
+        base = base[:len(base) - 1]
+    }
+    cps := compile_pats(pats)
+    has_neg := false
+    for k in cps[0] {
+        if str.starts_with(k, "!") {
+            has_neg = true
+        }
+    }
+    rbase := ""
+    if base == "." {
+        rbase = "."
+    }
+    kinds := []
+    epaths := []
+    erels := []
+    etask := []
+    ndir := 0
+    match fs.read_dir(base) {
+        .ok(names) => {
+            for name in names {
+                if !include_hidden && str.starts_with(name, ".") {
+                    continue
+                }
+                full := fs.join(base, name)
+                crel := name
+                if rbase != "" && rbase != "." {
+                    crel = rbase + "/" + name
+                }
+                if fs.is_dir(full) {
+                    if use_ignore && default_skip(name) {
+                        continue
+                    }
+                    if !use_ignore && (name == ".git" || name == ".hg" || name == ".svn") {
+                        continue
+                    }
+                    if use_ignore && !has_neg && dir_pruned(cps, crel, name) {
+                        continue
+                    }
+                    kinds = vec.push(kinds, 1)
+                    epaths = vec.push(epaths, full)
+                    erels = vec.push(erels, crel)
+                    etask = vec.push(etask, ndir)
+                    ndir = ndir + 1
+                    continue
+                }
+                if use_ignore && default_skip(name) {
+                    continue
+                }
+                if !use_ignore && (name == ".git" || name == ".hg" || name == ".svn") {
+                    continue
+                }
+                if use_ignore && is_ignored_compiled(cps, crel, name) {
+                    continue
+                }
+                kinds = vec.push(kinds, 0)
+                epaths = vec.push(epaths, full)
+                erels = vec.push(erels, "")
+                etask = vec.push(etask, -1)
+            }
+            noop()
+        }
+        .err(_) => noop()
+    }
+    workers := tasks
+    if workers < 1 {
+        workers = 1
+    }
+    if workers > walk_task_cap() {
+        workers = walk_task_cap()
+    }
+    // Serial when there is nothing to fan out to.
+    if ndir < 2 || workers < 2 {
+        return walk_rec(base, rbase, cps, use_ignore, include_hidden, has_neg, 0)
+    }
+    // First `workers` subdirs go to tasks (in entry order); the rest
+    // are walked inline, still spliced at their entry position.
+    batches := workers
+    if batches > ndir {
+        batches = ndir
+    }
+    hs := []
+    for i in 0..len(kinds) {
+        if kinds[i] == 1 && etask[i] < batches {
+            d := epaths[i]
+            r := erels[i]
+            hs = vec.push(hs, task.spawn(|_| {
+                walk_rec(d, r, cps, use_ignore, include_hidden, has_neg, 1)
+            }))
+        }
+    }
+    results := []
+    for h in hs {
+        r:[str] = task.join(h)
+        results = vec.push(results, r)
+    }
+    out := []
+    for i in 0..len(kinds) {
+        if kinds[i] == 0 {
+            out = vec.push(out, epaths[i])
+            continue
+        }
+        if etask[i] < batches {
+            sub := results[etask[i]]
+            for s in sub {
+                out = vec.push(out, s)
+            }
+            continue
+        }
+        sub := walk_rec(epaths[i], erels[i], cps, use_ignore, include_hidden, has_neg, 1)
+        for s in sub {
+            out = vec.push(out, s)
+        }
+    }
+    out
 }
