@@ -489,6 +489,9 @@ pub func markdown_fences(content: str) -> [str] {
                 if tag == "zz" {
                     tag = "ZZ"
                 }
+                if tag == "yaml" || tag == "yml" {
+                    tag = "Yaml"
+                }
                 cur_lang = tag
                 in_fence = true
             }
