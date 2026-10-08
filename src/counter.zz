@@ -3,6 +3,7 @@
 // triple-quote doc strings (Python), Markdown fenced embeds.
 import std.str
 import std.vec
+import std.json
 
 import languages
 
@@ -56,6 +57,15 @@ pub func count_content_with(content: str, lang: str, markers: [str], bstart: str
     }
     if lang == "Astro" {
         return count_astro(content)
+    }
+    if lang == "Vue" || lang == "Svelte" {
+        return count_component(content, false)
+    }
+    if lang == "Mdx" {
+        return count_markdown(content)
+    }
+    if lang == "Jupyter" {
+        return count_notebook(content)
     }
     nested := lang == "Rust" || lang == "Swift" || lang == "Julia"
     whole := lang == "Ruby" || lang == "Perl"
@@ -116,6 +126,14 @@ pub func count_markdown(content: str) -> Counts {
 // astro_embeds. Single-line islands (`<style>x</style>`) stay markup.
 
 pub func count_astro(content: str) -> Counts {
+    count_component(content, true)
+}
+
+// Component counter (Astro/Vue/Svelte): frontmatter (Astro only) +
+// <style>/<script> islands extract to child rows; markup classifies
+// with HTML comment rules. See count_astro for the accounting.
+
+pub func count_component(content: str, front: bool) -> Counts {
     c := zero()
     lines := split_lines(content)
     in_front := false
@@ -133,12 +151,12 @@ pub func count_astro(content: str) -> Counts {
             c.blanks = c.blanks + 1
             continue
         }
-        if t == "---" && !front_done && !in_front {
+        if front && t == "---" && !front_done && !in_front {
             in_front = true
             c.comments = c.comments + 1
             continue
         }
-        if t == "---" && in_front {
+        if front && t == "---" && in_front {
             in_front = false
             front_done = true
             c.comments = c.comments + 1
@@ -191,6 +209,10 @@ pub func count_astro(content: str) -> Counts {
 // <script> -> TypeScript. Same \x01/\x02 protocol as markdown_fences.
 
 pub func astro_embeds(content: str) -> [str] {
+    island_embeds(content, true)
+}
+
+pub func island_embeds(content: str, front: bool) -> [str] {
     langs := []
     bodies := []
     lines := split_lines(content)
@@ -201,12 +223,12 @@ pub func astro_embeds(content: str) -> [str] {
     cur := ""
     for raw in lines {
         t := str.trim(raw)
-        if t == "---" && !front_done && !in_front {
+        if front && t == "---" && !front_done && !in_front {
             in_front = true
             cur = ""
             continue
         }
-        if t == "---" && in_front {
+        if front && t == "---" && in_front {
             in_front = false
             front_done = true
             langs = vec.push(langs, "Yaml")
@@ -257,6 +279,166 @@ pub func astro_embeds(content: str) -> [str] {
     out = vec.push(out, str.join(langs, "\x01"))
     out = vec.push(out, str.join(bodies, "\x02"))
     out
+}
+
+// Jupyter notebooks: code-cell sources count as code (Python child
+// rows via notebook_enc), markdown cells as comments, outputs ignored
+// (generated text, not source). Malformed JSON degrades to plain lines.
+
+func json_str(v: json) -> str {
+    if json.type(v) == "string" {
+        return json.as_str(v)
+    }
+    ""
+}
+
+// Helpers: every match uses early-return arms only (value-consistent by
+// construction — ZZ unifies match arms, so bare `{}` / mixed statement
+// arms do not compile; see entry_str in cache.zz for the house pattern).
+
+func cell_at(cells: json, i: int) -> json {
+    match json.get(cells, str(i)) {
+        .ok(v) => {
+            return v
+        }
+        .err(_) => {
+            return json.null()
+        }
+    }
+}
+
+func cell_str(cell: json, key: str) -> str {
+    match json.get(cell, key) {
+        .ok(v) => {
+            return json_str(v)
+        }
+        .err(_) => {
+            return ""
+        }
+    }
+}
+
+func source_text(v: json) -> str {
+    if json.type(v) != "array" {
+        return json_str(v)
+    }
+    out := ""
+    n := json.len(v)
+    for i in 0..n {
+        out = out + json_str(cell_at(v, i))
+    }
+    return out
+}
+
+func cell_source(cell: json) -> str {
+    match json.get(cell, "source") {
+        .ok(v) => {
+            return source_text(v)
+        }
+        .err(_) => {
+            return ""
+        }
+    }
+}
+pub func count_notebook(content: str) -> Counts {
+    c := zero()
+    match json.parse(content) {
+        .err(_) => {
+            return count_notebook_fallback(content)
+        }
+        .ok(doc) => {
+            if json.type(doc) != "object" {
+                return count_notebook_fallback(content)
+            }
+            if !json.has(doc, "cells") {
+                return count_notebook_fallback(content)
+            }
+            cells := cells_holder(doc)
+            if json.type(cells) != "array" {
+                return count_notebook_fallback(content)
+            }
+            n := json.len(cells)
+            for i in 0..n {
+                c = count_notebook_cell(cell_at(cells, i), c)
+            }
+        }
+    }
+    c.files = 1
+    c
+}
+
+func cells_holder(doc: json) -> json {
+    match json.get(doc, "cells") {
+        .ok(v) => {
+            return v
+        }
+        .err(_) => {
+            return json.null()
+        }
+    }
+}
+
+func count_notebook_fallback(content: str) -> Counts {
+    c := zero()
+    lines := split_lines(content)
+    for raw in lines {
+        c.lines = c.lines + 1
+        if str.trim(raw) == "" {
+            c.blanks = c.blanks + 1
+        } else {
+            c.code = c.code + 1
+        }
+    }
+    c.files = 1
+    c
+}
+
+func count_notebook_cell(cell: json, c: Counts) -> Counts {
+    ctype := cell_str(cell, "cell_type")
+    src := cell_source(cell)
+    lines := split_lines(src)
+    for raw in lines {
+        c.lines = c.lines + 1
+        if str.trim(raw) == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        if ctype == "markdown" {
+            c.comments = c.comments + 1
+        } else {
+            c.code = c.code + 1
+        }
+    }
+    c
+}
+
+pub func notebook_source(content: str) -> str {
+    match json.parse(content) {
+        .err(_) => {
+            return ""
+        }
+        .ok(doc) => {
+            if json.type(doc) != "object" {
+                return ""
+            }
+            if !json.has(doc, "cells") {
+                return ""
+            }
+            cells := cells_holder(doc)
+            if json.type(cells) != "array" {
+                return ""
+            }
+            out := ""
+            n := json.len(cells)
+            for i in 0..n {
+                cell := cell_at(cells, i)
+                if cell_str(cell, "cell_type") == "code" {
+                    out = out + cell_source(cell)
+                }
+            }
+            return out
+        }
+    }
 }
 
 // Extract fenced blocks: returns parallel arrays [lang, body].

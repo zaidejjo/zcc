@@ -232,6 +232,15 @@ pub func detect_lang(path: str) -> str {
     if ext == "md" || ext == "markdown" {
         return "Markdown"
     }
+    if ext == "mdx" {
+        return "Mdx"
+    }
+    if ext == "ipynb" {
+        return "Jupyter"
+    }
+    if ext == "astro" {
+        return "Astro"
+    }
     if ext == "txt" {
         return "Text"
     }

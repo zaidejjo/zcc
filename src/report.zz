@@ -240,6 +240,39 @@ pub func display_name(lang: str) -> str {
     if lang == "Sql" {
         return "SQL"
     }
+    if lang == "CSharp" {
+        return "C#"
+    }
+    if lang == "Cpp" {
+        return "C++"
+    }
+    if lang == "CppHeader" {
+        return "C++ Header"
+    }
+    if lang == "CHeader" {
+        return "C Header"
+    }
+    if lang == "FSharp" {
+        return "F#"
+    }
+    if lang == "Jsx" {
+        return "JSX"
+    }
+    if lang == "Tsx" {
+        return "TSX"
+    }
+    if lang == "Mdx" {
+        return "MDX"
+    }
+    if lang == "VimScript" {
+        return "Vim Script"
+    }
+    if lang == "ObjectiveC" {
+        return "Objective-C"
+    }
+    if lang == "ObjectiveCpp" {
+        return "Objective-C++"
+    }
     lang
 }
 
@@ -465,7 +498,7 @@ pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int]
             rel = rel[len(prefix):len(rel)]
         }
         c0 := pad_r(display_path(rel), 44)
-        c1 := pad_r(langs[k], 12)
+        c1 := pad_r(display_name(langs[k]), 12)
         c2 := pad_l(str(lines[k]), 10)
         c3 := pad_l(str(code[k]), 10)
         c4 := pad_l(str(comments[k]), 10)

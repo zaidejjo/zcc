@@ -805,3 +805,60 @@ func test_sort_keys() {
     assert_eq(report.display_name("Json"), "JSON")
     assert_eq(report.display_name("Rust"), "Rust")
 }
+
+@test
+func test_notebook_basic() {
+    src := "{\"cells\": [{\"cell_type\": \"markdown\", \"source\": [\"# Title\\n\"]}, {\"cell_type\": \"code\", \"source\": [\"x = 1\\n\", \"\\n\"]}, {\"cell_type\": \"code\", \"source\": [\"y = 2\\n\"]}], \"metadata\": {}, \"nbformat\": 4}"
+    c := counter.count_content(src, "Jupyter")
+    assert_eq(c.lines, 4)
+    assert_eq(c.code, 2)
+    assert_eq(c.comments, 1)
+    assert_eq(c.blanks, 1)
+    body := counter.notebook_source(src)
+    assert(str_contains(body, "x = 1"))
+    assert(!str_contains(body, "Title"))
+    enc := parallel.notebook_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(report.totals(t)[0], 1)
+    assert_eq(report.totals(t)[1], 3)
+}
+
+@test
+func test_notebook_malformed() {
+    c := counter.count_content("not json at all\n", "Jupyter")
+    assert_eq(c.lines, 1)
+    assert_eq(c.code, 1)
+}
+
+@test
+func test_vue_basic() {
+    src := "<!-- h -->\n<template>\n<h1>{{t}}</h1>\n</template>\n<script>\nlet x = 1;\n</script>\n"
+    c := counter.count_content(src, "Vue")
+    assert_eq(c.lines, 7)
+    assert_eq(c.code, 6)
+    assert_eq(c.comments, 1)
+    enc := parallel.island_enc(src, false)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(report.totals(t)[0], 1)
+}
+
+@test
+func test_svelte_no_frontmatter() {
+    src := "---\n<p>x</p>\n"
+    c := counter.count_content(src, "Svelte")
+    assert_eq(c.lines, 2)
+    assert_eq(c.code, 2)
+    assert_eq(c.comments, 0)
+}
+
+@test
+func test_mdx_fences() {
+    src := "# T\n\n```python\nx = 1\n```\n"
+    c := counter.count_content(src, "Mdx")
+    assert_eq(c.lines, 5)
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 3)
+    assert_eq(c.blanks, 1)
+}
