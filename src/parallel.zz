@@ -100,26 +100,31 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                 code = vec.push(code, c.code)
                 comments = vec.push(comments, c.comments)
                 blanks = vec.push(blanks, c.blanks)
+                // Embedded extraction only for emb-capable langs on the
+                // non-Generated path (the merger drops fenc when
+                // show != lang, so Generated-path files skip the
+                // split + recount entirely; plain langs skip after
+                // the outer compares).
                 fenc := ""
-                if langs[i] == "Markdown" && shows[i] == "Markdown" {
-                    fenc = fence_enc(text)
-                    noop()
-                }
-                if langs[i] == "Astro" && shows[i] == "Astro" {
-                    fenc = astro_enc(text)
-                    noop()
-                }
-                if (langs[i] == "Vue" || langs[i] == "Svelte") && shows[i] == langs[i] {
-                    fenc = island_enc(text, false)
-                    noop()
-                }
-                if langs[i] == "Jupyter" && shows[i] == "Jupyter" {
-                    fenc = notebook_enc(text)
-                    noop()
-                }
-                if langs[i] == "Mdx" && shows[i] == "Mdx" {
-                    fenc = fence_enc(text)
-                    noop()
+                if langs[i] == "Markdown" || langs[i] == "Mdx" || langs[i] == "Astro" || langs[i] == "Vue" || langs[i] == "Svelte" || langs[i] == "Jupyter" {
+                    if shows[i] == langs[i] {
+                        if langs[i] == "Markdown" || langs[i] == "Mdx" {
+                            fenc = fence_enc(text)
+                            noop()
+                        }
+                        if langs[i] == "Astro" {
+                            fenc = astro_enc(text)
+                            noop()
+                        }
+                        if langs[i] == "Vue" || langs[i] == "Svelte" {
+                            fenc = island_enc(text, false)
+                            noop()
+                        }
+                        if langs[i] == "Jupyter" {
+                            fenc = notebook_enc(text)
+                            noop()
+                        }
+                    }
                 }
                 fencs = vec.push(fencs, fenc)
                 oks = vec.push(oks, 1)
