@@ -10,6 +10,7 @@ import std.vec
 import cache
 import config
 import counter
+import diff
 import languages
 import parallel
 import report
@@ -1013,4 +1014,24 @@ func test_yaml_fence() {
     assert_eq(t.langs[0], "└ Yaml")
     assert_eq(report.totals(t)[2], 1)
     assert_eq(report.totals(t)[3], 1)
+}
+
+@test
+func test_diff_stats() {
+    cfg := config.load_config()
+    table := config.lang_table_with(cfg)
+    em := languages.build_ext_map(table)
+    out := "10\t2\tsrc/main.zz\n3\t3\tsrc/util.py\n-\t-\tbin/app\n5\t0\tREADME.md\n"
+    res := diff.diff_stats(em, out)
+    assert_eq(res.nfiles, 3)
+    zi := report.find_lang(res.t, "ZZ")
+    assert(zi >= 0)
+    assert_eq(res.added[zi], 10)
+    assert_eq(res.removed[zi], 2)
+    py := report.find_lang(res.t, "Python")
+    assert(py >= 0)
+    assert_eq(res.added[py], 3)
+    mi := report.find_lang(res.t, "Markdown")
+    assert(mi >= 0)
+    assert_eq(res.t.files[mi], 1)
 }
