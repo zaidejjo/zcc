@@ -1,5 +1,6 @@
 [package]
 name = "zcc"
-version = "0.1.0"
+version = "0.3.0"
 
 [dependencies]
+table = "^0.6.0"

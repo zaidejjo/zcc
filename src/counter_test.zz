@@ -7,9 +7,11 @@ import std.str
 import std.time
 import std.vec
 
+import blame
 import cache
 import config
 import counter
+import diff
 import languages
 import parallel
 import report
@@ -276,7 +278,7 @@ func test_top_by_lines() {
 func test_files_json_shape() {
     t := report.new_table()
     t = report.add_row(t, "Rust", 1, 10, 7, 2, 1)
-    j := report.to_json_full(t, ["a.rs", "b.rs"], ["Rust", "Rust"], [10, 3], [7, 3], [2, 0], [1, 0], 5)
+    j := report.to_json_full(t, report.new_table(), ["a.rs", "b.rs"], ["Rust", "Rust"], [10, 3], [7, 3], [2, 0], [1, 0], 5)
     assert(str_contains(j, "\"files\":["))
     assert(str_contains(j, "a.rs"))
     assert(str_contains(j, "\"language\":\"Rust\""))
@@ -285,12 +287,21 @@ func test_files_json_shape() {
         .ok(_) => walker.noop()
         .err(_) => fail("to_json_full is not valid JSON")
     }
-    match json.parse(report.to_json(t)) {
+    match json.parse(report.to_json(t, report.new_table())) {
         .ok(_) => walker.noop()
         .err(_) => fail("to_json is not valid JSON")
     }
     // plain json unchanged (no files key)
-    assert(!str_contains(report.to_json(t), "\"files\":["))
+    assert(!str_contains(report.to_json(t, report.new_table()), "\"files\":["))
+    // embedded rows export under "embedded" with stripped lang names
+    e := report.new_table()
+    e = report.add_row(e, "└ BASH", 1, 20, 17, 0, 3)
+    j2 := report.to_json(t, e)
+    assert(str_contains(j2, "\"embedded\":{\"BASH\""))
+    match json.parse(j2) {
+        .ok(_) => walker.noop()
+        .err(_) => fail("to_json embedded is not valid JSON")
+    }
 }
 
 @test
@@ -596,7 +607,7 @@ func test_ignore_match() {
 func test_report_json() {
     t := report.new_table()
     t = report.add_row(t, "Rust", 2, 10, 7, 2, 1)
-    j := report.to_json(t)
+    j := report.to_json(t, report.new_table())
     assert(str_contains(j, "Rust"))
     assert(str_contains(j, "total"))
 }
@@ -754,4 +765,312 @@ func str_contains(s: str, sub: str) -> bool {
         i = i + 1
     }
     false
+}
+
+@test
+func test_astro_basic() {
+    src := "---\ntitle: hi\n---\n<!-- comment -->\n<h1>{{x}}</h1>\n<style>\n.a { color: red; }\n</style>\n<script>\nlet y = 1; // init\n</script>\n<p>done</p>\n"
+    c := counter.count_content(src, "Astro")
+    assert_eq(c.lines, 12)
+    assert_eq(c.code, 9)
+    assert_eq(c.comments, 3)
+    assert_eq(c.blanks, 0)
+}
+
+@test
+func test_astro_embeds() {
+    src := "---\ntitle: hi\n---\n<p>x</p>\n<style>\n.a { color: red; }\n</style>\n"
+    e := counter.astro_embeds(src)
+    assert_eq(len(e), 2)
+    langs := str.split(e[0], "\x01")
+    assert_eq(len(langs), 2)
+    assert_eq(langs[0], "Yaml")
+    assert_eq(langs[1], "Css")
+    enc := parallel.astro_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(report.totals(t)[0], 2)
+}
+
+@test
+func test_sort_keys() {
+    t := report.new_table()
+    t = report.add_row(t, "A", 1, 30, 10, 5, 1)
+    t = report.add_row(t, "B", 5, 10, 20, 1, 1)
+    s := report.sort_table(t, "code", false)
+    assert_eq(s.langs[0], "B")
+    s = report.sort_table(t, "files", false)
+    assert_eq(s.langs[0], "B")
+    s = report.sort_table(t, "lines", true)
+    assert_eq(s.langs[0], "B")
+    assert_eq(report.display_name("Css"), "CSS")
+    assert_eq(report.display_name("Json"), "JSON")
+    assert_eq(report.display_name("Rust"), "Rust")
+}
+
+@test
+func test_notebook_basic() {
+    src := "{\"cells\": [{\"cell_type\": \"markdown\", \"source\": [\"# Title\\n\"]}, {\"cell_type\": \"code\", \"source\": [\"x = 1\\n\", \"\\n\"]}, {\"cell_type\": \"code\", \"source\": [\"y = 2\\n\"]}], \"metadata\": {}, \"nbformat\": 4}"
+    c := counter.count_content(src, "Jupyter")
+    assert_eq(c.lines, 4)
+    assert_eq(c.code, 2)
+    assert_eq(c.comments, 1)
+    assert_eq(c.blanks, 1)
+    body := counter.notebook_source(src)
+    assert(str_contains(body, "x = 1"))
+    assert(!str_contains(body, "Title"))
+    enc := parallel.notebook_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(report.totals(t)[0], 1)
+    assert_eq(report.totals(t)[1], 3)
+}
+
+@test
+func test_notebook_malformed() {
+    c := counter.count_content("not json at all\n", "Jupyter")
+    assert_eq(c.lines, 1)
+    assert_eq(c.code, 1)
+}
+
+@test
+func test_vue_basic() {
+    src := "<!-- h -->\n<template>\n<h1>{{t}}</h1>\n</template>\n<script>\nlet x = 1;\n</script>\n"
+    c := counter.count_content(src, "Vue")
+    assert_eq(c.lines, 7)
+    assert_eq(c.code, 6)
+    assert_eq(c.comments, 1)
+    enc := parallel.island_enc(src, false)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(report.totals(t)[0], 1)
+}
+
+@test
+func test_svelte_no_frontmatter() {
+    src := "---\n<p>x</p>\n"
+    c := counter.count_content(src, "Svelte")
+    assert_eq(c.lines, 2)
+    assert_eq(c.code, 2)
+    assert_eq(c.comments, 0)
+}
+
+@test
+func test_mdx_fences() {
+    src := "# T\n\n```python\nx = 1\n```\n"
+    c := counter.count_content(src, "Mdx")
+    assert_eq(c.lines, 5)
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 3)
+    assert_eq(c.blanks, 1)
+}
+
+@test
+func test_is_generated_content() {
+    assert(walker.is_generated_content("// Code generated by protoc. DO NOT EDIT.\npackage foo\n"))
+    assert(walker.is_generated_content("# auto-generated file\nx = 1\n"))
+    assert(!walker.is_generated_content("x = 1\n// just a comment\n"))
+    assert(!walker.is_generated_content(""))
+    longline := str.repeat("a", 2001)
+    assert(walker.is_generated_content("{longline}\n"))
+    assert(!walker.is_generated_content("a\nb\nc\nd\n"))
+}
+
+@test
+func test_filter_lang() {
+    t := report.new_table()
+    t = report.add_row(t, "Rust", 1, 10, 7, 2, 1)
+    t = report.add_row(t, "Generated", 2, 100, 90, 5, 5)
+    f := report.filter_lang(t, "Generated")
+    assert_eq(len(f.langs), 1)
+    assert_eq(f.langs[0], "Rust")
+    assert_eq(report.totals(f)[0], 1)
+}
+
+@test
+func test_zz_fence() {
+    src := "# Doc\n\n```zz\nname := 1\nprintln(name)\n```\n"
+    fenced := counter.markdown_fences(src)
+    langs := str.split(fenced[0], "\x01")
+    assert_eq(langs[0], "ZZ")
+    enc := parallel.fence_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(t.langs[0], "└ ZZ")
+    assert_eq(report.totals(t)[1], 2)
+}
+
+func write_file(path: str, body: str) {
+    match fs.write(path, body) {
+        .ok(_) => walker.noop()
+        .err(_) => fail("write " + path)
+    }
+}
+
+func has_path(files: [str], suffix: str) -> bool {
+    for f in files {
+        if str.ends_with(f, suffix) {
+            return true
+        }
+    }
+    false
+}
+
+@test
+func test_walk_adversarial() {
+    base := fs.join(env.temp_dir(), "zcc_adv_test")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    for d in ["a", "b", "sub/.git", "loop1", "loop2"] {
+        match fs.mkdir_all(fs.join(base, d)) {
+            .ok(_) => walker.noop()
+            .err(_) => fail("mkdir " + d)
+        }
+    }
+    write_file(fs.join(base, "a/a.rs"), "fn main() {}\n")
+    write_file(fs.join(base, "b/b.py"), "x = 1\n")
+    write_file(fs.join(base, "sub/inner.rs"), "fn f() {}\n")
+    write_file(fs.join(base, "sub/.git/config"), "[core]\n")
+    write_file(fs.join(base, ".hidden.rs"), "fn h() {}\n")
+    write_file(fs.join(base, ".gitignore"), "*.log\n!important.log\n")
+    write_file(fs.join(base, "app.log"), "noise\n")
+    write_file(fs.join(base, "important.log"), "keep\n")
+    // symlink loop + file link (posix only; absence skips link asserts)
+    links_ok := false
+    match process.run("ln", ["-s", fs.join(base, "loop2"), fs.join(base, "loop1/link")]) {
+        .ok(_) => {
+            match process.run("ln", ["-s", fs.join(base, "loop1"), fs.join(base, "loop2/link")]) {
+                .ok(_) => {
+                    match process.run("ln", ["-s", fs.join(base, "a/a.rs"), fs.join(base, "link.rs")]) {
+                        .ok(_) => {
+                            links_ok = true
+                        }
+                        .err(_) => walker.noop()
+                    }
+                }
+                .err(_) => walker.noop()
+            }
+        }
+        .err(_) => walker.noop()
+    }
+    pats := walker.load_patterns(base)
+    t0 := time.now_ms()
+    files := walker.walk_files(base, pats, true, false)
+    elapsed := time.now_ms() - t0
+    assert(elapsed < 30000)
+    assert(has_path(files, "a/a.rs"))
+    assert(has_path(files, "b/b.py"))
+    assert(has_path(files, "sub/inner.rs"))
+    assert(has_path(files, "important.log"))
+    assert(!has_path(files, "app.log"))
+    assert(!has_path(files, ".hidden.rs"))
+    assert(!has_path(files, ".git/config"))
+    if links_ok {
+        assert(has_path(files, "link.rs"))
+        // loop links terminate via depth cap: bounded total, no dup explosion
+        assert(len(files) < 40)
+    }
+    shown := walker.walk_files(base, pats, true, true)
+    assert(has_path(shown, ".hidden.rs"))
+    raw := walker.walk_files(base, pats, false, false)
+    assert(has_path(raw, "app.log"))
+    assert(has_path(raw, "important.log"))
+    assert(!has_path(raw, "sub/.git/config"))
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
+
+@test
+func test_rooted_ignore() {
+    pats := ["/desktop/desktop", "/target", "*.log", "!keep.log"]
+    cps := walker.compile_pats(pats)
+    // exact file hit
+    assert(walker.match_pat("slash", "desktop/desktop", "", "desktop/desktop", "desktop"))
+    // ancestor dir descends (the desktop/ wipeout bug)
+    assert(!walker.match_pat("slash", "desktop/desktop", "", "desktop", "desktop"))
+    // unrelated deep path untouched
+    assert(!walker.match_pat("slash", "desktop/desktop", "", "desktop/frontend/src/main.tsx", "main.tsx"))
+    // rooted dir still prunes itself (dir-level check)
+    assert(walker.dir_pruned(cps, "target", "target"))
+    assert(!walker.dir_pruned(cps, "desktop", "desktop"))
+    // file under rooted dir ignored (negation-mode file check)
+    assert(walker.is_ignored_by("target/foo/x.rs", false, pats))
+    assert(walker.is_ignored_by("desktop/desktop", false, pats))
+    assert(!walker.is_ignored_by("desktop/frontend/src/main.tsx", false, pats))
+}
+
+@test
+func test_yaml_fence() {
+    src := "# Doc\n\n```yaml\nkey: value\n# comment\n```\n"
+    fenced := counter.markdown_fences(src)
+    langs := str.split(fenced[0], "\x01")
+    assert_eq(langs[0], "Yaml")
+    enc := parallel.fence_enc(src)
+    t := report.new_table()
+    t = cache.merge_emb_enc(t, enc)
+    assert_eq(t.langs[0], "└ Yaml")
+    assert_eq(report.totals(t)[2], 1)
+    assert_eq(report.totals(t)[3], 1)
+}
+
+@test
+func test_diff_stats() {
+    cfg := config.load_config()
+    table := config.lang_table_with(cfg)
+    em := languages.build_ext_map(table)
+    out := "10\t2\tsrc/main.zz\n3\t3\tsrc/util.py\n-\t-\tbin/app\n5\t0\tREADME.md\n"
+    res := diff.diff_stats(em, out)
+    assert_eq(res.nfiles, 3)
+    zi := report.find_lang(res.t, "ZZ")
+    assert(zi >= 0)
+    assert_eq(res.added[zi], 10)
+    assert_eq(res.removed[zi], 2)
+    py := report.find_lang(res.t, "Python")
+    assert(py >= 0)
+    assert_eq(res.added[py], 3)
+    mi := report.find_lang(res.t, "Markdown")
+    assert(mi >= 0)
+    assert_eq(res.t.files[mi], 1)
+}
+
+@test
+func test_blame_parse() {
+    sample := "abc123 1 1 2\nauthor Jane Doe\nauthor-mail <j@x.io>\ncommitter Jane Doe\nxyz789 2 2\nunknown line\nauthor Bot\n"
+    names := blame.parse_blame_authors(sample)
+    assert_eq(len(names), 2)
+    assert_eq(names[0], "Jane Doe")
+    assert_eq(names[1], "Bot")
+    assert_eq(len(blame.parse_blame_authors("")), 0)
+}
+
+@test
+func test_new_langs() {
+    scss := ".a {\n  // tint\n  color: red;\n}\n"
+    c := counter.count_content(scss, "Scss")
+    assert_eq(c.lines, 4)
+    assert_eq(c.code, 3)
+    assert_eq(c.comments, 1)
+    tf := "# main\nresource \"x\" \"y\" {}\n"
+    c = counter.count_content(tf, "Terraform")
+    assert_eq(c.lines, 2)
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 1)
+    gql := "# schema\ntype Q {\n  f: Int\n}\n\"\"\"Doc\"\"\"\n"
+    c = counter.count_content(gql, "GraphQL")
+    assert_eq(c.lines, 5)
+    assert_eq(c.code, 3)
+    assert_eq(c.comments, 2)
+    proto := "// gen\nsyntax = \"proto3\";\n"
+    c = counter.count_content(proto, "Protobuf")
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 1)
+    prisma := "model U {\n  id Int\n}\n"
+    c = counter.count_content(prisma, "Prisma")
+    assert_eq(c.code, 3)
+    assert_eq(report.display_name("Scss"), "SCSS")
+    assert_eq(report.display_name("GraphQL"), "GraphQL")
 }

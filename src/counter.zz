@@ -3,6 +3,7 @@
 // triple-quote doc strings (Python), Markdown fenced embeds.
 import std.str
 import std.vec
+import std.json
 
 import languages
 
@@ -53,6 +54,18 @@ pub func count_content(content: str, lang: str) -> Counts {
 pub func count_content_with(content: str, lang: str, markers: [str], bstart: str, bend: str) -> Counts {
     if lang == "Markdown" {
         return count_markdown(content)
+    }
+    if lang == "Astro" {
+        return count_astro(content)
+    }
+    if lang == "Vue" || lang == "Svelte" {
+        return count_component(content, false)
+    }
+    if lang == "Mdx" {
+        return count_markdown(content)
+    }
+    if lang == "Jupyter" {
+        return count_notebook(content)
     }
     nested := lang == "Rust" || lang == "Swift" || lang == "Julia"
     whole := lang == "Ruby" || lang == "Perl"
@@ -106,6 +119,361 @@ pub func count_markdown(content: str) -> Counts {
     c
 }
 
+// Astro: frontmatter (---) + <style>/<script> islands extract to child
+// rows (like Markdown fences); markup classifies with HTML comment
+// rules. Frontmatter delimiters count as comments, island bodies as
+// code here for line balance, re-attributed by the caller via
+// astro_embeds. Single-line islands (`<style>x</style>`) stay markup.
+
+pub func count_astro(content: str) -> Counts {
+    count_component(content, true)
+}
+
+// Component counter (Astro/Vue/Svelte): frontmatter (Astro only) +
+// <style>/<script> islands extract to child rows; markup classifies
+// with HTML comment rules. See count_astro for the accounting.
+
+pub func count_component(content: str, front: bool) -> Counts {
+    c := zero()
+    lines := split_lines(content)
+    in_front := false
+    front_done := false
+    in_style := false
+    in_script := false
+    for raw in lines {
+        c.lines = c.lines + 1
+        if raw == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        t := str.trim(raw)
+        if t == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        if front && t == "---" && !front_done && !in_front {
+            in_front = true
+            c.comments = c.comments + 1
+            continue
+        }
+        if front && t == "---" && in_front {
+            in_front = false
+            front_done = true
+            c.comments = c.comments + 1
+            continue
+        }
+        if in_front {
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "<style") {
+            in_style = true
+            if str.contains(t, "</style>") {
+                in_style = false
+            }
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "</style>") {
+            in_style = false
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "<script") {
+            in_script = true
+            if str.contains(t, "</script>") {
+                in_script = false
+            }
+            c.code = c.code + 1
+            continue
+        }
+        if str.starts_with(t, "</script>") {
+            in_script = false
+            c.code = c.code + 1
+            continue
+        }
+        if in_style || in_script {
+            c.code = c.code + 1
+            continue
+        }
+        // Markup line: HTML comment rules, one native call.
+        r := str.classify(raw, [], "<!--", "-->", false, false)
+        c.code = c.code + r[1]
+        c.comments = c.comments + r[2]
+    }
+    c.files = 1
+    c
+}
+
+// Extract Astro embedded bodies: frontmatter -> Yaml, <style> -> Css,
+// <script> -> TypeScript. Same \x01/\x02 protocol as markdown_fences.
+
+pub func astro_embeds(content: str) -> [str] {
+    island_embeds(content, true)
+}
+
+pub func island_embeds(content: str, front: bool) -> [str] {
+    langs := []
+    bodies := []
+    lines := split_lines(content)
+    in_front := false
+    front_done := false
+    in_style := false
+    in_script := false
+    cur := ""
+    for raw in lines {
+        t := str.trim(raw)
+        if front && t == "---" && !front_done && !in_front {
+            in_front = true
+            cur = ""
+            continue
+        }
+        if front && t == "---" && in_front {
+            in_front = false
+            front_done = true
+            langs = vec.push(langs, "Yaml")
+            bodies = vec.push(bodies, cur)
+            cur = ""
+            continue
+        }
+        if in_front {
+            cur = cur + raw + "\n"
+            continue
+        }
+        if str.starts_with(t, "<style") {
+            if str.contains(t, "</style>") {
+                continue
+            }
+            in_style = true
+            cur = ""
+            continue
+        }
+        if str.starts_with(t, "</style>") {
+            in_style = false
+            langs = vec.push(langs, "Css")
+            bodies = vec.push(bodies, cur)
+            cur = ""
+            continue
+        }
+        if str.starts_with(t, "<script") {
+            if str.contains(t, "</script>") {
+                continue
+            }
+            in_script = true
+            cur = ""
+            continue
+        }
+        if str.starts_with(t, "</script>") {
+            in_script = false
+            langs = vec.push(langs, "TypeScript")
+            bodies = vec.push(bodies, cur)
+            cur = ""
+            continue
+        }
+        if in_style || in_script {
+            cur = cur + raw + "\n"
+            continue
+        }
+    }
+    out := []
+    out = vec.push(out, str.join(langs, "\x01"))
+    out = vec.push(out, str.join(bodies, "\x02"))
+    out
+}
+
+// Jupyter notebooks: code-cell sources count as code (Python child
+// rows via notebook_enc), markdown cells as comments, outputs ignored
+// (generated text, not source). Malformed JSON degrades to plain lines.
+
+func json_str(v: json) -> str {
+    if json.type(v) == "string" {
+        return json.as_str(v)
+    }
+    ""
+}
+
+// Helpers: every match uses early-return arms only (value-consistent by
+// construction — ZZ unifies match arms, so bare `{}` / mixed statement
+// arms do not compile; see entry_str in cache.zz for the house pattern).
+
+func cell_at(cells: json, i: int) -> json {
+    match json.get(cells, str(i)) {
+        .ok(v) => {
+            return v
+        }
+        .err(_) => {
+            return json.null()
+        }
+    }
+}
+
+func cell_str(cell: json, key: str) -> str {
+    match json.get(cell, key) {
+        .ok(v) => {
+            return json_str(v)
+        }
+        .err(_) => {
+            return ""
+        }
+    }
+}
+
+func source_text(v: json) -> str {
+    if json.type(v) != "array" {
+        return json_str(v)
+    }
+    out := ""
+    n := json.len(v)
+    for i in 0..n {
+        out = out + json_str(cell_at(v, i))
+    }
+    return out
+}
+
+func cell_source(cell: json) -> str {
+    match json.get(cell, "source") {
+        .ok(v) => {
+            return source_text(v)
+        }
+        .err(_) => {
+            return ""
+        }
+    }
+}
+pub func count_notebook(content: str) -> Counts {
+    c := zero()
+    match json.parse(content) {
+        .err(_) => {
+            return count_notebook_fallback(content)
+        }
+        .ok(doc) => {
+            if json.type(doc) != "object" {
+                return count_notebook_fallback(content)
+            }
+            if !json.has(doc, "cells") {
+                return count_notebook_fallback(content)
+            }
+            cells := cells_holder(doc)
+            if json.type(cells) != "array" {
+                return count_notebook_fallback(content)
+            }
+            n := json.len(cells)
+            for i in 0..n {
+                c = count_notebook_cell(cell_at(cells, i), c)
+            }
+        }
+    }
+    c.files = 1
+    c
+}
+
+func cells_holder(doc: json) -> json {
+    match json.get(doc, "cells") {
+        .ok(v) => {
+            return v
+        }
+        .err(_) => {
+            return json.null()
+        }
+    }
+}
+
+func count_notebook_fallback(content: str) -> Counts {
+    c := zero()
+    lines := split_lines(content)
+    for raw in lines {
+        c.lines = c.lines + 1
+        if str.trim(raw) == "" {
+            c.blanks = c.blanks + 1
+        } else {
+            c.code = c.code + 1
+        }
+    }
+    c.files = 1
+    c
+}
+
+func count_notebook_cell(cell: json, c: Counts) -> Counts {
+    ctype := cell_str(cell, "cell_type")
+    src := cell_source(cell)
+    lines := split_lines(src)
+    for raw in lines {
+        c.lines = c.lines + 1
+        if str.trim(raw) == "" {
+            c.blanks = c.blanks + 1
+            continue
+        }
+        if ctype == "markdown" {
+            c.comments = c.comments + 1
+        } else {
+            c.code = c.code + 1
+        }
+    }
+    c
+}
+
+pub func notebook_source(content: str) -> str {
+    match json.parse(content) {
+        .err(_) => {
+            return ""
+        }
+        .ok(doc) => {
+            if json.type(doc) != "object" {
+                return ""
+            }
+            if !json.has(doc, "cells") {
+                return ""
+            }
+            cells := cells_holder(doc)
+            if json.type(cells) != "array" {
+                return ""
+            }
+            out := ""
+            n := json.len(cells)
+            for i in 0..n {
+                cell := cell_at(cells, i)
+                if cell_str(cell, "cell_type") == "code" {
+                    out = out + cell_source(cell)
+                }
+            }
+            return out
+        }
+    }
+}
+
+// Fence-tag normalization: markdown tags to zcc language names.
+// Data table, not a chain — same convention as display_map above.
+
+func fence_tags() -> [[str]] {
+    [
+        ["bash", "BASH"],
+        ["sh", "BASH"],
+        ["shell", "BASH"],
+        ["rust", "Rust"],
+        ["python", "Python"],
+        ["py", "Python"],
+        ["toml", "TOML"],
+        ["lua", "Lua"],
+        ["js", "JavaScript"],
+        ["javascript", "JavaScript"],
+        ["ts", "TypeScript"],
+        ["typescript", "TypeScript"],
+        ["astro", "Astro"],
+        ["zz", "ZZ"],
+        ["yaml", "Yaml"],
+        ["yml", "Yaml"],
+    ]
+}
+
+func fence_lang(tag: str) -> str {
+    for pair in fence_tags() {
+        if pair[0] == tag {
+            return pair[1]
+        }
+    }
+    tag
+}
+
 // Extract fenced blocks: returns parallel arrays [lang, body].
 
 pub func markdown_fences(content: str) -> [str] {
@@ -127,28 +495,7 @@ pub func markdown_fences(content: str) -> [str] {
             } else {
                 tag := str.trim(str.split(t, "```")[1] ?? "")
                 // normalize fence tags to zcc language names
-                if tag == "bash" || tag == "sh" || tag == "shell" {
-                    tag = "BASH"
-                }
-                if tag == "rust" {
-                    tag = "Rust"
-                }
-                if tag == "python" || tag == "py" {
-                    tag = "Python"
-                }
-                if tag == "toml" {
-                    tag = "TOML"
-                }
-                if tag == "lua" {
-                    tag = "Lua"
-                }
-                if tag == "js" || tag == "javascript" {
-                    tag = "JavaScript"
-                }
-                if tag == "ts" || tag == "typescript" {
-                    tag = "TypeScript"
-                }
-                cur_lang = tag
+                cur_lang = fence_lang(tag)
                 in_fence = true
             }
             continue

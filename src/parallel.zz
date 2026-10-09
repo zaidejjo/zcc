@@ -32,12 +32,13 @@ pub struct ChunkOut {
     blanks: [int],
     fencs: [str],
     oks: [int],
+    gens: [int],
 }
 
 // Cross-module constructor (struct literals are same-module only).
 
-pub func new_chunk_out(lines: [int], code: [int], comments: [int], blanks: [int], fencs: [str], oks: [int]) -> ChunkOut {
-    ChunkOut{lines: lines, code: code, comments: comments, blanks: blanks, fencs: fencs, oks: oks}
+pub func new_chunk_out(lines: [int], code: [int], comments: [int], blanks: [int], fencs: [str], oks: [int], gens: [int]) -> ChunkOut {
+    ChunkOut{lines: lines, code: code, comments: comments, blanks: blanks, fencs: fencs, oks: oks, gens: gens}
 }
 
 // Cold runs below this many misses stay serial: spawn + snapshot costs
@@ -75,6 +76,7 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
     blanks := []
     fencs := []
     oks := []
+    gens := []
     for i in start..end {
         match fs.read_to_string(paths[i]) {
             .ok(text) => {
@@ -85,7 +87,12 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                     blanks = vec.push(blanks, 0)
                     fencs = vec.push(fencs, "")
                     oks = vec.push(oks, 0)
+                    gens = vec.push(gens, 0)
                     continue
+                }
+                gen := 0
+                if shows[i] != "Generated" && walker.is_generated_content(text) {
+                    gen = 1
                 }
                 markers := split_markers(mjoined[i])
                 c := counter.count_content_with(text, langs[i], markers, bstarts[i], bends[i])
@@ -98,8 +105,25 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                     fenc = fence_enc(text)
                     noop()
                 }
+                if langs[i] == "Astro" && shows[i] == "Astro" {
+                    fenc = astro_enc(text)
+                    noop()
+                }
+                if (langs[i] == "Vue" || langs[i] == "Svelte") && shows[i] == langs[i] {
+                    fenc = island_enc(text, false)
+                    noop()
+                }
+                if langs[i] == "Jupyter" && shows[i] == "Jupyter" {
+                    fenc = notebook_enc(text)
+                    noop()
+                }
+                if langs[i] == "Mdx" && shows[i] == "Mdx" {
+                    fenc = fence_enc(text)
+                    noop()
+                }
                 fencs = vec.push(fencs, fenc)
                 oks = vec.push(oks, 1)
+                gens = vec.push(gens, gen)
             }
             .err(_) => {
                 lines = vec.push(lines, 0)
@@ -108,15 +132,89 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                 blanks = vec.push(blanks, 0)
                 fencs = vec.push(fencs, "")
                 oks = vec.push(oks, 0)
+                gens = vec.push(gens, 0)
             }
         }
     }
-    new_chunk_out(lines, code, comments, blanks, fencs, oks)
+    new_chunk_out(lines, code, comments, blanks, fencs, oks, gens)
 }
 
 func noop() {
     
     
+}
+
+// Astro island rows for one body (same enc protocol as fence_enc;
+// files-with-islands, not island spans).
+
+pub func astro_enc(text: str) -> str {
+    island_enc(text, true)
+}
+
+pub func island_enc(text: str, front: bool) -> str {
+    rows := []
+    embeds := counter.island_embeds(text, front)
+    if len(embeds) != 2 {
+        return ""
+    }
+    lang_part := embeds[0]
+    body_part := embeds[1]
+    if lang_part == "" {
+        return ""
+    }
+    llist := str.split(lang_part, "\x01")
+    blist := str.split(body_part, "\x02")
+    agg_lang := []
+    agg_lines := []
+    agg_code := []
+    agg_comments := []
+    agg_blanks := []
+    for i in 0..len(llist) {
+        tag := llist[i]
+        if tag == "" {
+            continue
+        }
+        body := ""
+        if i < len(blist) {
+            body = blist[i]
+        }
+        ec := counter.count_content(body, tag)
+        if languages.is_one_of(tag, ["Yaml", "Css", "TypeScript", "JavaScript"]) {
+            hit := -1
+            for q in 0..len(agg_lang) {
+                if agg_lang[q] == tag {
+                    hit = q
+                    break
+                }
+            }
+            if hit < 0 {
+                agg_lang = vec.push(agg_lang, tag)
+                agg_lines = vec.push(agg_lines, ec.lines)
+                agg_code = vec.push(agg_code, ec.code)
+                agg_comments = vec.push(agg_comments, ec.comments)
+                agg_blanks = vec.push(agg_blanks, ec.blanks)
+            } else {
+                agg_lines[hit] = agg_lines[hit] + ec.lines
+                agg_code[hit] = agg_code[hit] + ec.code
+                agg_comments[hit] = agg_comments[hit] + ec.comments
+                agg_blanks[hit] = agg_blanks[hit] + ec.blanks
+            }
+        }
+    }
+    rows = []
+    for q in 0..len(agg_lang) {
+        rows = vec.push(rows, "└ {agg_lang[q]}\x1f1\x1f{agg_lines[q]}\x1f{agg_code[q]}\x1f{agg_comments[q]}\x1f{agg_blanks[q]}")
+    }
+    str.join(rows, "\x1e")
+}
+
+pub func notebook_enc(text: str) -> str {
+    body := counter.notebook_source(text)
+    if body == "" {
+        return ""
+    }
+    ec := counter.count_content(body, "Python")
+    "└ Python\x1f1\x1f{ec.lines}\x1f{ec.code}\x1f{ec.comments}\x1f{ec.blanks}"
 }
 
 // Extract fenced-code rows from one Markdown body as a raw emb
@@ -136,6 +234,13 @@ pub func fence_enc(text: str) -> str {
     }
     llist := str.split(lang_part, "\x01")
     blist := str.split(body_part, "\x02")
+    // Aggregate same-language blocks within this file: Files counts
+    // files-with-fences (tokei parity), not fence blocks.
+    agg_lang := []
+    agg_lines := []
+    agg_code := []
+    agg_comments := []
+    agg_blanks := []
     for i in 0..len(llist) {
         tag := llist[i]
         if tag == "" {
@@ -146,13 +251,32 @@ pub func fence_enc(text: str) -> str {
             body = blist[i]
         }
         disp := tag
-        if disp == "BASH" {
-            disp = "BASH"
-        }
         ec := counter.count_content(body, disp)
-        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" {
-            rows = vec.push(rows, "└ {disp}\x1f1\x1f{ec.lines}\x1f{ec.code}\x1f{ec.comments}\x1f{ec.blanks}")
+        if languages.is_one_of(disp, ["BASH", "Rust", "Python", "TOML", "Lua", "JavaScript", "TypeScript", "Astro", "ZZ", "Yaml"]) {
+            hit := -1
+            for q in 0..len(agg_lang) {
+                if agg_lang[q] == disp {
+                    hit = q
+                    break
+                }
+            }
+            if hit < 0 {
+                agg_lang = vec.push(agg_lang, disp)
+                agg_lines = vec.push(agg_lines, ec.lines)
+                agg_code = vec.push(agg_code, ec.code)
+                agg_comments = vec.push(agg_comments, ec.comments)
+                agg_blanks = vec.push(agg_blanks, ec.blanks)
+            } else {
+                agg_lines[hit] = agg_lines[hit] + ec.lines
+                agg_code[hit] = agg_code[hit] + ec.code
+                agg_comments[hit] = agg_comments[hit] + ec.comments
+                agg_blanks[hit] = agg_blanks[hit] + ec.blanks
+            }
         }
+    }
+    rows = []
+    for q in 0..len(agg_lang) {
+        rows = vec.push(rows, "└ {agg_lang[q]}\x1f1\x1f{agg_lines[q]}\x1f{agg_code[q]}\x1f{agg_comments[q]}\x1f{agg_blanks[q]}")
     }
     str.join(rows, "\x1e")
 }

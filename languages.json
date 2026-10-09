@@ -1,74 +1,576 @@
 {
-  "Assembly": { "extensions": ["asm", "s", "S"], "files": [], "line": [";", "#", "//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "AutoHotKey": { "extensions": ["ahk", "ahkl"], "files": [], "line": [";"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Bash": { "extensions": ["sh", "bash"], "files": [".bashrc", ".bash_profile", "PKGBUILD"], "line": ["#"], "block_start": [": '"], "block_end": ["'"] },
-  "C": { "extensions": ["c"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "CHeader": { "extensions": ["h"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "CMake": { "extensions": ["cmake"], "files": ["CMakeLists.txt"], "line": ["#"], "block_start": ["#[["], "block_end": ["]]"] },
-  "CoffeeScript": { "extensions": ["coffee"], "files": [], "line": ["#"], "block_start": ["###"], "block_end": ["###"] },
-  "Cpp": { "extensions": ["cpp", "cc", "cxx", "c++", "cp"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "CppHeader": { "extensions": ["hpp", "hh", "hxx"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "CSharp": { "extensions": ["cs"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "CShell": { "extensions": ["csh"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "Css": { "extensions": ["css"], "files": [], "line": [], "block_start": ["/*"], "block_end": ["*/"] },
-  "Cuda": { "extensions": ["cu", "cuh"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Cython": { "extensions": ["pyx", "pxd"], "files": [], "line": ["#"], "block_start": ["\"\"\""], "block_end": ["\"\"\""] },
-  "D": { "extensions": ["d"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "D2": { "extensions": ["d2"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Dart": { "extensions": ["dart"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Dockerfile": { "extensions": ["dockerfile"], "files": ["Dockerfile", "dockerfile"], "line": ["#"], "block_start": [], "block_end": [] },
-  "Elixir": { "extensions": ["ex", "exs"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "Erlang": { "extensions": ["erl", "hrl"], "files": [], "line": ["%"], "block_start": [], "block_end": [] },
-  "Fish": { "extensions": ["fish"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "FSharp": { "extensions": ["fs", "fsi", "fsx"], "files": [], "line": ["//"], "block_start": ["(*"], "block_end": ["*)"] },
-  "GdScript": { "extensions": ["gd"], "files": [], "line": ["#"], "block_start": ["\"\"\""], "block_end": ["\"\"\""] },
-  "GdShader": { "extensions": ["gdshader"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Go": { "extensions": ["go"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Html": { "extensions": ["html", "htm"], "files": [], "line": [], "block_start": ["<!--"], "block_end": ["-->"] },
-  "Java": { "extensions": ["java"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "JavaScript": { "extensions": ["js", "mjs", "cjs"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Jq": { "extensions": ["jq"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "Json": { "extensions": ["json"], "files": [], "line": [], "block_start": [], "block_end": [] },
-  "Jsx": { "extensions": ["jsx"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Julia": { "extensions": ["jl"], "files": [], "line": ["#"], "block_start": ["#="], "block_end": ["=#"] },
-  "Kotlin": { "extensions": ["kt", "kts"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "LLVM": { "extensions": ["ll"], "files": [], "line": [";"], "block_start": [], "block_end": [] },
-  "Lua": { "extensions": ["lua"], "files": [], "line": ["--"], "block_start": ["--\\[\\["], "block_end": ["\\]\\]"] },
-  "Makefile": { "extensions": ["mk", "mak"], "files": ["Makefile", "makefile", "GNUmakefile"], "line": ["#"], "block_start": [], "block_end": [] },
-  "Markdown": { "extensions": ["md", "markdown"], "files": [], "line": [], "block_start": [], "block_end": [] },
-  "Nim": { "extensions": ["nim", "nims"], "files": [], "line": ["#"], "block_start": ["#[:"], "block_end": [":]#"] },
-  "Nushell": { "extensions": ["nu"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "ObjectiveC": { "extensions": ["m"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "ObjectiveCpp": { "extensions": ["mm"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "OCaml": { "extensions": ["ml", "mli"], "files": [], "line": [], "block_start": ["(*"], "block_end": ["*)"] },
-  "Pascal": { "extensions": ["pas", "pp"], "files": [], "line": ["//"], "block_start": ["{"], "block_end": ["}"] },
-  "Perl": { "extensions": ["pl", "pm"], "files": [], "line": ["#"], "block_start": ["=cut"], "block_end": ["=cut"] },
-  "Perl6": { "extensions": ["p6", "pm6", "raku"], "files": [], "line": ["#"], "block_start": ["#="], "block_end": ["=#"] },
-  "Php": { "extensions": ["php"], "files": [], "line": ["//", "#"], "block_start": ["/*"], "block_end": ["*/"] },
-  "PowerShell": { "extensions": ["ps1", "psm1", "psd1"], "files": [], "line": ["#"], "block_start": ["<#"], "block_end": ["#>"] },
-  "Python": { "extensions": ["py", "pyw"], "files": [], "line": ["#"], "block_start": ["\"\"\""], "block_end": ["\"\"\""] },
-  "Qml": { "extensions": ["qml"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "R": { "extensions": ["r", "R"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "Ruby": { "extensions": ["rb"], "files": ["Gemfile", "Rakefile"], "line": ["#"], "block_start": ["=begin"], "block_end": ["=end"] },
-  "RubyHtml": { "extensions": ["erb"], "files": [], "line": ["#"], "block_start": ["<%="], "block_end": ["%>"] },
-  "Rust": { "extensions": ["rs"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Scala": { "extensions": ["scala", "sc"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Sql": { "extensions": ["sql"], "files": [], "line": ["--"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Svelte": { "extensions": ["svelte"], "files": [], "line": ["//"], "block_start": ["<!--"], "block_end": ["-->"] },
-  "Svg": { "extensions": ["svg"], "files": [], "line": [], "block_start": ["<!--"], "block_end": ["-->"] },
-  "Swift": { "extensions": ["swift"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "Text": { "extensions": ["txt"], "files": [], "line": [], "block_start": [], "block_end": [] },
-  "Toml": { "extensions": ["toml"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "Tsx": { "extensions": ["tsx"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "TypeScript": { "extensions": ["ts", "mts", "cts"], "files": [], "line": ["//"], "block_start": ["/*"], "block_end": ["*/"] },
-  "VB6": { "extensions": ["bas", "cls", "frm"], "files": [], "line": ["'"], "block_start": [], "block_end": [] },
-  "VBScript": { "extensions": ["vbs"], "files": [], "line": ["'"], "block_start": [], "block_end": [] },
-  "VimScript": { "extensions": ["vim"], "files": [".vimrc"], "line": ["\""], "block_start": [], "block_end": [] },
-  "Vue": { "extensions": ["vue"], "files": [], "line": ["//"], "block_start": ["<!--"], "block_end": ["-->"] },
-  "WebAssembly": { "extensions": ["wat", "wast"], "files": [], "line": [";;"], "block_start": ["(;"], "block_end": [";)"] },
-  "Xml": { "extensions": ["xml"], "files": [], "line": [], "block_start": ["<!--"], "block_end": ["-->"] },
-  "Yaml": { "extensions": ["yaml", "yml"], "files": [], "line": ["#"], "block_start": [], "block_end": [] },
-  "Zig": { "extensions": ["zig"], "files": [], "line": ["//"], "block_start": [], "block_end": [] },
-  "Zsh": { "extensions": ["zsh"], "files": [".zshrc"], "line": ["#"], "block_start": [], "block_end": [] },
-  "ZZ": { "extensions": ["zz"], "files": [], "line": ["//", "#"], "block_start": ["/*"], "block_end": ["*/"] }
+  "Assembly": {
+    "extensions": ["asm", "s", "S"],
+    "files": [],
+    "line": [";", "#", "//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Astro": {
+    "extensions": ["astro"],
+    "files": [],
+    "line": [],
+    "block_start": ["<!--"],
+    "block_end": ["-->"]
+  },
+  "AutoHotKey": {
+    "extensions": ["ahk", "ahkl"],
+    "files": [],
+    "line": [";"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Bash": {
+    "extensions": ["sh", "bash"],
+    "files": [".bashrc", ".bash_profile", "PKGBUILD"],
+    "line": ["#"],
+    "block_start": [": '"],
+    "block_end": ["'"]
+  },
+  "C": {
+    "extensions": ["c"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "CHeader": {
+    "extensions": ["h"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "CMake": {
+    "extensions": ["cmake"],
+    "files": ["CMakeLists.txt"],
+    "line": ["#"],
+    "block_start": ["#[["],
+    "block_end": ["]]"]
+  },
+  "CoffeeScript": {
+    "extensions": ["coffee"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["###"],
+    "block_end": ["###"]
+  },
+  "Cpp": {
+    "extensions": ["cpp", "cc", "cxx", "c++", "cp"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "CppHeader": {
+    "extensions": ["hpp", "hh", "hxx"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "CSharp": {
+    "extensions": ["cs"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "CShell": {
+    "extensions": ["csh"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Css": {
+    "extensions": ["css"],
+    "files": [],
+    "line": [],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Cuda": {
+    "extensions": ["cu", "cuh"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Cython": {
+    "extensions": ["pyx", "pxd"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["\"\"\""],
+    "block_end": ["\"\"\""]
+  },
+  "D": {
+    "extensions": ["d"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "D2": {
+    "extensions": ["d2"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Dart": {
+    "extensions": ["dart"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Dockerfile": {
+    "extensions": ["dockerfile"],
+    "files": ["Dockerfile", "dockerfile"],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Elixir": {
+    "extensions": ["ex", "exs"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Erlang": {
+    "extensions": ["erl", "hrl"],
+    "files": [],
+    "line": ["%"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Fish": {
+    "extensions": ["fish"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "FSharp": {
+    "extensions": ["fs", "fsi", "fsx"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["(*"],
+    "block_end": ["*)"]
+  },
+  "GdScript": {
+    "extensions": ["gd"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["\"\"\""],
+    "block_end": ["\"\"\""]
+  },
+  "GdShader": {
+    "extensions": ["gdshader"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Go": {
+    "extensions": ["go"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "GraphQL": {
+    "extensions": ["graphql", "gql"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["\"\"\""],
+    "block_end": ["\"\"\""]
+  },
+  "Html": {
+    "extensions": ["html", "htm"],
+    "files": [],
+    "line": [],
+    "block_start": ["<!--"],
+    "block_end": ["-->"]
+  },
+  "Java": {
+    "extensions": ["java"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "JavaScript": {
+    "extensions": ["js", "mjs", "cjs"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Jq": {
+    "extensions": ["jq"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Json": {
+    "extensions": ["json"],
+    "files": [],
+    "line": [],
+    "block_start": [],
+    "block_end": []
+  },
+  "Jsx": {
+    "extensions": ["jsx"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Julia": {
+    "extensions": ["jl"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["#="],
+    "block_end": ["=#"]
+  },
+  "Jupyter": {
+    "extensions": ["ipynb"],
+    "files": [],
+    "line": [],
+    "block_start": [],
+    "block_end": []
+  },
+  "Kotlin": {
+    "extensions": ["kt", "kts"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Less": {
+    "extensions": ["less"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "LLVM": {
+    "extensions": ["ll"],
+    "files": [],
+    "line": [";"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Lua": {
+    "extensions": ["lua"],
+    "files": [],
+    "line": ["--"],
+    "block_start": ["--\\[\\["],
+    "block_end": ["\\]\\]"]
+  },
+  "Makefile": {
+    "extensions": ["mk", "mak"],
+    "files": ["Makefile", "makefile", "GNUmakefile"],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Mdx": {
+    "extensions": ["mdx"],
+    "files": [],
+    "line": [],
+    "block_start": [],
+    "block_end": []
+  },
+  "Markdown": {
+    "extensions": ["md", "markdown"],
+    "files": [],
+    "line": [],
+    "block_start": [],
+    "block_end": []
+  },
+  "Nim": {
+    "extensions": ["nim", "nims"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["#[:"],
+    "block_end": [":]#"]
+  },
+  "Nushell": {
+    "extensions": ["nu"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "ObjectiveC": {
+    "extensions": ["m"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "ObjectiveCpp": {
+    "extensions": ["mm"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "OCaml": {
+    "extensions": ["ml", "mli"],
+    "files": [],
+    "line": [],
+    "block_start": ["(*"],
+    "block_end": ["*)"]
+  },
+  "Pascal": {
+    "extensions": ["pas", "pp"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["{"],
+    "block_end": ["}"]
+  },
+  "Perl": {
+    "extensions": ["pl", "pm"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["=cut"],
+    "block_end": ["=cut"]
+  },
+  "Perl6": {
+    "extensions": ["p6", "pm6", "raku"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["#="],
+    "block_end": ["=#"]
+  },
+  "Php": {
+    "extensions": ["php"],
+    "files": [],
+    "line": ["//", "#"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "PowerShell": {
+    "extensions": ["ps1", "psm1", "psd1"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["<#"],
+    "block_end": ["#>"]
+  },
+  "Prisma": {
+    "extensions": ["prisma"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Protobuf": {
+    "extensions": ["proto"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Python": {
+    "extensions": ["py", "pyw"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["\"\"\""],
+    "block_end": ["\"\"\""]
+  },
+  "Qml": {
+    "extensions": ["qml"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "R": {
+    "extensions": ["r", "R"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Ruby": {
+    "extensions": ["rb"],
+    "files": ["Gemfile", "Rakefile"],
+    "line": ["#"],
+    "block_start": ["=begin"],
+    "block_end": ["=end"]
+  },
+  "RubyHtml": {
+    "extensions": ["erb"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["<%="],
+    "block_end": ["%>"]
+  },
+  "Rust": {
+    "extensions": ["rs"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Scala": {
+    "extensions": ["scala", "sc"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Scss": {
+    "extensions": ["scss"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Sql": {
+    "extensions": ["sql"],
+    "files": [],
+    "line": ["--"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Stylus": {
+    "extensions": ["styl"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Svelte": {
+    "extensions": ["svelte"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["<!--"],
+    "block_end": ["-->"]
+  },
+  "Svg": {
+    "extensions": ["svg"],
+    "files": [],
+    "line": [],
+    "block_start": ["<!--"],
+    "block_end": ["-->"]
+  },
+  "Swift": {
+    "extensions": ["swift"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Terraform": {
+    "extensions": ["tf", "tfvars", "hcl"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Text": {
+    "extensions": ["txt"],
+    "files": [],
+    "line": [],
+    "block_start": [],
+    "block_end": []
+  },
+  "Toml": {
+    "extensions": ["toml"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Tsx": {
+    "extensions": ["tsx"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "TypeScript": {
+    "extensions": ["ts", "mts", "cts"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "VB6": {
+    "extensions": ["bas", "cls", "frm"],
+    "files": [],
+    "line": ["'"],
+    "block_start": [],
+    "block_end": []
+  },
+  "VBScript": {
+    "extensions": ["vbs"],
+    "files": [],
+    "line": ["'"],
+    "block_start": [],
+    "block_end": []
+  },
+  "VimScript": {
+    "extensions": ["vim"],
+    "files": [".vimrc"],
+    "line": ["\""],
+    "block_start": [],
+    "block_end": []
+  },
+  "Vue": {
+    "extensions": ["vue"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["<!--"],
+    "block_end": ["-->"]
+  },
+  "WebAssembly": {
+    "extensions": ["wat", "wast"],
+    "files": [],
+    "line": [";;"],
+    "block_start": ["(;"],
+    "block_end": [";)"]
+  },
+  "Xml": {
+    "extensions": ["xml"],
+    "files": [],
+    "line": [],
+    "block_start": ["<!--"],
+    "block_end": ["-->"]
+  },
+  "Yaml": {
+    "extensions": ["yaml", "yml"],
+    "files": [],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Zig": {
+    "extensions": ["zig"],
+    "files": [],
+    "line": ["//"],
+    "block_start": [],
+    "block_end": []
+  },
+  "Zsh": {
+    "extensions": ["zsh"],
+    "files": [".zshrc"],
+    "line": ["#"],
+    "block_start": [],
+    "block_end": []
+  },
+  "ZZ": {
+    "extensions": ["zz"],
+    "files": [],
+    "line": ["//", "#"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  }
 }

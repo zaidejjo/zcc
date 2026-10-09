@@ -1,0 +1,141 @@
+// text.zz — pure string measuring, cleaning, and shaping for tables.
+//
+// No table types here on purpose: this module is a leaf so both the
+// package entry and future modules can share it without cycles.
+import std.str
+import std.vec
+
+/// Visible width of a cell: ANSI `\e[...m` sequences (from `std.colors`)
+/// contribute 0, every other char contributes 1. Box glyphs (`╭`, `─`)
+/// count as 1 each, matching terminal columns.
+
+pub func visible_len(s: str) -> int {
+    chars := str.split(s, "")
+    n := 0
+    esc := 0
+    i := 0
+    total := len(chars)
+    c := ""
+    while i < total {
+        c = chars[i]
+        if c == "\e" {
+            esc = 1
+        } else {
+            if esc == 1 {
+                if c == "m" {
+                    esc = 0
+                }
+            } else {
+                if c != "" {
+                    n = n + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    n
+}
+
+// Single-line cells only: embedded newlines/tabs would break the grid,
+// so fold them to spaces. Pure and total on any input.
+
+pub func sanitize(s: str) -> str {
+    r := str.replace(s, "\r", "")
+    r = str.replace(r, "\n", " ")
+    r = str.replace(r, "\t", " ")
+    r
+}
+
+// Truncate to `max` visible columns: keep `max - 1` visible chars plus
+// a trailing `…` (total width is exactly `max`). ANSI `\e[...m`
+// sequences pass through untouched, and a closing reset is appended
+// when the input carried styling so colors never bleed. Callers only
+// invoke this when `visible_len(s) > max`, with `max >= 1`.
+
+pub func truncate_ansi(s: str, max: int) -> str {
+    chars := str.split(s, "")
+    out := ""
+    vis := 0
+    esc := 0
+    saw:int = 0
+    limit := max - 1
+    i := 0
+    total := len(chars)
+    c := ""
+    while i < total {
+        c = chars[i]
+        if c == "\e" {
+            esc = 1
+            saw = 1
+            out = out + c
+        } else {
+            if esc == 1 {
+                out = out + c
+                if c == "m" {
+                    esc = 0
+                }
+            } else {
+                if c != "" && vis < limit {
+                    out = out + c
+                    vis = vis + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    out = out + "…"
+    if saw == 1 {
+        out = out + "\e[0m"
+    }
+    out
+}
+
+// Numeric-looking text (ints via the `int()` builtin, floats by shape:
+// optional sign, digits, one dot). Powers auto alignment.
+
+pub func is_num_text(s: str) -> bool {
+    if s == "" {
+        return false
+    }
+    if int(s) != .none {
+        return true
+    }
+    chars := str.split(s, "")
+    n := vec.len(chars)
+    i := 0
+    pos := 0
+    dot:int = 0
+    dig:int = 0
+    ok:int = 1
+    while i < n {
+        c := chars[i]
+        if c == "" {
+            i = i + 1
+            continue
+        }
+        if c == "." {
+            dot = dot + 1
+        } else {
+            if c == "+" || c == "-" {
+                if pos != 0 {
+                    ok = 0
+                }
+            } else {
+                if c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" || c == "6" || c == "7" || c == "8" || c == "9" {
+                    dig = dig + 1
+                } else {
+                    ok = 0
+                }
+            }
+        }
+        pos = pos + 1
+        i = i + 1
+    }
+    if ok == 0 {
+        return false
+    }
+    if dot != 1 {
+        return false
+    }
+    dig > 0
+}

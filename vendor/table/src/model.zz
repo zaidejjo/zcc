@@ -1,0 +1,907 @@
+// model.zz — Table struct, builders, setters, and bridges.
+// Field-touching code lives here; renderers live in render.zz.
+import std.csv
+import std.json
+import std.vec
+
+import text
+import theme
+
+/// A table under construction. Passed by value — re-bind after each call:
+///
+///   t := table.new(["A"])
+///   t = table.add_row(t, ["1"])
+
+pub struct Table {
+    headers: [str],
+    rows: [[str]],
+    aligns: [str],
+    def_align: str,
+    header_align: str,
+    col_caps: [int],
+    max_width: int,
+    max_rows: int,
+    row_offset: int,
+    style: str,
+    padding: int,
+    title: str,
+    caption: str,
+    footer: [str],
+    row_lines: bool,
+    outer_border: bool,
+    header_line: bool,
+}
+
+/// Create a table with header cells. Style defaults to "rounded".
+
+pub func new(headers: [str]) -> Table {
+    aligns:[str] = []
+    caps:[int] = []
+    i := 0
+    n := len(headers)
+    while i < n {
+        aligns = vec.push(aligns, "auto")
+        caps = vec.push(caps, 0)
+        i = i + 1
+    }
+    Table{headers: headers, rows: [], aligns: aligns, def_align: "auto", header_align: "auto", col_caps: caps, max_width: 0, max_rows: 0, row_offset: 0, style: "rounded", padding: 1, title: "", caption: "", footer: [], row_lines: false, outer_border: true, header_line: true}
+}
+
+/// Body row count. Handy for paging UIs (`set_max_rows`/`set_row_offset`).
+
+pub func row_count(t: Table) -> int {
+    len(t.rows)
+}
+
+/// Rendered column count: widest of headers, rows, and footer.
+
+pub func col_count(t: Table) -> int {
+    n := len(t.headers)
+    i := 0
+    m := len(t.rows)
+    while i < m {
+        w := len(t.rows[i])
+        if w > n {
+            n = w
+        }
+        i = i + 1
+    }
+    f := len(t.footer)
+    if f > n {
+        n = f
+    }
+    n
+}
+
+/// Header cells (a copy — mutating it never touches the table).
+
+pub func headers(t: Table) -> [str] {
+    out:[str] = []
+    i := 0
+    n := len(t.headers)
+    while i < n {
+        out = vec.push(out, t.headers[i])
+        i = i + 1
+    }
+    out
+}
+
+/// One body row (a copy). Out-of-range indices yield `[]`, never a panic.
+
+pub func row(t: Table, i: int) -> [str] {
+    out:[str] = []
+    if i < 0 {
+        return out
+    }
+    if i >= len(t.rows) {
+        return out
+    }
+    src := t.rows[i]
+    j := 0
+    while j < len(src) {
+        out = vec.push(out, src[j])
+        j = j + 1
+    }
+    out
+}
+
+// Sum and count of numeric-looking body cells in one column.
+// Non-numeric cells never vote (same rule as auto-alignment).
+
+func col_sum_count(t: Table, col: int) -> [float] {
+    out:[float] = []
+    out = vec.push(out, 0.0)
+    out = vec.push(out, 0.0)
+    if col < 0 {
+        return out
+    }
+    r := 0
+    while r < len(t.rows) {
+        if col < len(t.rows[r]) {
+            s := text.sanitize(t.rows[r][col])
+            if text.is_num_text(s) {
+                out[0] = out[0] + float(s)
+                out[1] = out[1] + 1.0
+            }
+        }
+        r = r + 1
+    }
+    out
+}
+
+/// Sum of numeric-looking body cells in one column. Non-numeric
+/// cells are skipped; empty or bad columns yield `0.0`.
+
+pub func col_sum(t: Table, col: int) -> float {
+    col_sum_count(t, col)[0]
+}
+
+/// Mean of numeric-looking body cells in one column. No numeric
+/// cells (or a bad column) yields `0.0` — never a divide-by-zero.
+
+pub func col_avg(t: Table, col: int) -> float {
+    sc := col_sum_count(t, col)
+    if sc[1] == 0.0 {
+        return 0.0
+    }
+    sc[0] / sc[1]
+}
+
+/// Count of numeric-looking body cells in one column. Bad columns
+/// yield `0`.
+
+pub func col_num_count(t: Table, col: int) -> int {
+    n := 0
+    if col < 0 {
+        return n
+    }
+    r := 0
+    while r < len(t.rows) {
+        if col < len(t.rows[r]) {
+            if text.is_num_text(text.sanitize(t.rows[r][col])) {
+                n = n + 1
+            }
+        }
+        r = r + 1
+    }
+    n
+}
+
+/// Create a table from headers plus all rows at once.
+
+pub func from_rows(headers: [str], rows: [[str]]) -> Table {
+    t := new(headers)
+    t = add_rows(t, rows)
+    t
+}
+
+/// Append one row. Short rows are padded with ""; long rows are kept
+/// whole (extra cells render). Never fails.
+
+pub func add_row(t: Table, row: [str]) -> Table {
+    t.rows = vec.push(t.rows, row)
+    // Keep aligns/caps as long as the widest row seen so far. Late
+    // columns inherit the sticky default from set_align_all.
+    i := len(t.aligns)
+    m := len(row)
+    while i < m {
+        t.aligns = vec.push(t.aligns, t.def_align)
+        t.col_caps = vec.push(t.col_caps, 0)
+        i = i + 1
+    }
+    t
+}
+
+/// Build from an array of dicts. Values convert with `str()`; every
+/// dict must contain every header (a missing key is a runtime error,
+/// like a short sqlz row). Header order sets column order:
+///
+///   table.from_dicts(["id", "name"], [{"id": 1, "name": "a"}])
+
+pub func from_dicts<T>(headers: [str], rows: [{str: T}]) -> Table {
+    t := new(headers)
+    row:[str] = []
+    i := 0
+    n := len(rows)
+    while i < n {
+        row = []
+        h := 0
+        nh := len(headers)
+        while h < nh {
+            row = vec.push(row, str(rows[i][headers[h]]))
+            h = h + 1
+        }
+        t = add_row(t, row)
+        i = i + 1
+    }
+    t
+}
+
+/// Append many rows at once (cheaper than looping in user code).
+
+pub func add_rows(t: Table, rows: [[str]]) -> Table {
+    i := 0
+    n := len(rows)
+    while i < n {
+        t = add_row(t, rows[i])
+        i = i + 1
+    }
+    t
+}
+
+/// Build from any row type via a mapper closure. This is the sqlz
+/// bridge: query structs (or unannoted `row{c0, …}` dicts) become
+/// string cells through your mapper. Rows-first so `|>` pipelines
+/// read naturally:
+///
+///   users |> table.from(["ID", "NAME"], |u: User| [str(u.id), u.name])
+///         |> table.render()
+///
+///   rows |> table.from(["ID", "NAME"], |r| [str(r.c0), str(r.c1)])
+///        |> table.render()
+
+pub func from<T>(rows: [T], headers: [str], f: func(T) -> [str]) -> Table {
+    t := new(headers)
+    i := 0
+    n := len(rows)
+    while i < n {
+        t = add_row(t, f(rows[i]))
+        i = i + 1
+    }
+    t
+}
+
+/// One string column from any row type. Combine with `from_cols` to
+/// assemble tables column by column, or use it standalone:
+///
+///   ids := table.column(users, |u: User| str(u.id))
+
+pub func column<T>(rows: [T], f: func(T) -> str) -> [str] {
+    out:[str] = []
+    i := 0
+    n := len(rows)
+    while i < n {
+        out = vec.push(out, f(rows[i]))
+        i = i + 1
+    }
+    out
+}
+
+/// Build from a JSON document: array-of-arrays (cells in order) or
+/// array-of-objects (columns picked in `headers` order, missing keys
+/// render blank). Scalars convert naturally (numbers keep their text,
+/// booleans print true/false, null and nesting render blank). Total:
+/// invalid JSON or a non-array document yields a headers-only table.
+///
+///   table.from_json(["ID", "NAME"], "[{\"id\": 1, \"name\": \"a\"}]")
+
+pub func from_json(headers: [str], text: str) -> Table {
+    t := new(headers)
+    match json.parse(text) {
+        .ok(doc) => fill_json(t, doc)
+        .err(_) => t
+    }
+}
+
+/// Build from CSV text via `std.csv` (RFC4180: quoted commas, doubled
+/// quotes, custom delimiters). First row is data, not headers — pass
+/// headers explicitly, or `[]` to take them from the first row.
+/// Total: invalid CSV yields a headers-only table, never an error.
+///
+///   table.from_csv(["ID", "NAME"], "1,a\n2,b\n")
+
+pub func from_csv(headers: [str], text: str) -> Table {
+    t := new(headers)
+    if csv.validate(text) == false {
+        return t
+    }
+    fill_csv(t, csv.parse(text))
+}
+
+/// Build from delimited text (`";"`, tabs, pipes) via
+/// `csv.parse_delim`. Same header rules as `from_csv`.
+
+pub func from_csv_delim(headers: [str], text: str, delim: str) -> Table {
+    t := new(headers)
+    if csv.validate(text) == false {
+        return t
+    }
+    fill_csv(t, csv.parse_delim(text, delim))
+}
+
+// Shared body loader: derive headers from the first row when none
+// were given, then append every record. Ragged rows ride along —
+// `add_row` pads short and keeps long, like everywhere else.
+
+func fill_csv(t: Table, rows: [[str]]) -> Table {
+    recs := rows
+    if len(t.headers) == 0 {
+        if len(rows) == 0 {
+            return t
+        }
+        t.headers = rows[0]
+        t = sync_spans(t)
+        recs = []
+        i := 1
+        while i < len(rows) {
+            recs = vec.push(recs, rows[i])
+            i = i + 1
+        }
+    }
+    add_rows(t, recs)
+}
+
+func fill_json(t: Table, doc: json) -> Table {
+    if json.type(doc) != "array" {
+        return t
+    }
+    n := json.len(doc)
+    i := 0
+    first:int = 1
+    while i < n {
+        if let .ok(item) = json.get(doc, str(i)) {
+            if first == 1 && len(t.headers) == 0 && json.type(item) == "object" {
+                t.headers = json.keys(item)
+                t = sync_spans(t)
+            }
+            t = add_json_row(t, item)
+            first = 0
+        }
+        i = i + 1
+    }
+    t
+}
+
+// Grow aligns/caps to match headers set after construction (used when
+// from_json derives headers from the first object's keys).
+
+func sync_spans(t: Table) -> Table {
+    i := len(t.aligns)
+    m := len(t.headers)
+    while i < m {
+        t.aligns = vec.push(t.aligns, t.def_align)
+        t.col_caps = vec.push(t.col_caps, 0)
+        i = i + 1
+    }
+    t
+}
+
+func add_json_row(t: Table, item: json) -> Table {
+    kind := json.type(item)
+    row:[str] = []
+    if kind == "array" {
+        row = []
+        m := json.len(item)
+        j := 0
+        while j < m {
+            match json.get(item, str(j)) {
+                .ok(v) => {
+                    row = vec.push(row, json_cell(v))
+                }
+                .err(_) => {
+                    row = vec.push(row, "")
+                }
+            }
+            j = j + 1
+        }
+        return add_row(t, row)
+    }
+    if kind == "object" {
+        row = []
+        h := 0
+        nh := len(t.headers)
+        while h < nh {
+            match json.get(item, t.headers[h]) {
+                .ok(v) => {
+                    row = vec.push(row, json_cell(v))
+                }
+                .err(_) => {
+                    row = vec.push(row, "")
+                }
+            }
+            h = h + 1
+        }
+        return add_row(t, row)
+    }
+    t
+}
+
+func json_cell(v: json) -> str {
+    k := json.type(v)
+    if k == "string" {
+        return json.as_str(v)
+    }
+    if k == "number" {
+        return json.stringify(v) ?? ""
+    }
+    if k == "bool" {
+        if json.as_bool(v) {
+            return "true"
+        }
+        return "false"
+    }
+    ""
+}
+
+/// Build by transposing columns into rows. Short columns pad with "";
+/// extra headers render blank over missing cells. Never fails.
+
+pub func from_cols(headers: [str], cols: [[str]]) -> Table {
+    t := new(headers)
+    nrows := 0
+    c := 0
+    nc := len(cols)
+    while c < nc {
+        w := len(cols[c])
+        if w > nrows {
+            nrows = w
+        }
+        c = c + 1
+    }
+    r := 0
+    buf:[str] = []
+    while r < nrows {
+        buf = []
+        c = 0
+        while c < nc {
+            if r < len(cols[c]) {
+                buf = vec.push(buf, cols[c][r])
+            } else {
+                buf = vec.push(buf, "")
+            }
+            c = c + 1
+        }
+        t = add_row(t, buf)
+        r = r + 1
+    }
+    t
+}
+
+/// Insert a 1-based index column at the left. Numbers are global, so
+/// pages (`set_row_offset`) stay stable. The index column is numeric
+/// (auto right-aligned); pass `""` for a blank header. The footer
+/// gains a blank cell to stay aligned.
+
+pub func with_row_numbers(t: Table, header: str) -> Table {
+    nh:[str] = []
+    nh = vec.push(nh, header)
+    i := 0
+    while i < len(t.headers) {
+        nh = vec.push(nh, t.headers[i])
+        i = i + 1
+    }
+    t.headers = nh
+    na:[str] = []
+    na = vec.push(na, "auto")
+    i = 0
+    while i < len(t.aligns) {
+        na = vec.push(na, t.aligns[i])
+        i = i + 1
+    }
+    t.aligns = na
+    nc:[int] = []
+    nc = vec.push(nc, 0)
+    i = 0
+    while i < len(t.col_caps) {
+        nc = vec.push(nc, t.col_caps[i])
+        i = i + 1
+    }
+    t.col_caps = nc
+    r := 0
+    while r < len(t.rows) {
+        buf:[str] = []
+        buf = vec.push(buf, str(r + 1))
+        c := 0
+        old := t.rows[r]
+        while c < len(old) {
+            buf = vec.push(buf, old[c])
+            c = c + 1
+        }
+        t.rows[r] = buf
+        r = r + 1
+    }
+    if len(t.footer) > 0 {
+        fb:[str] = []
+        fb = vec.push(fb, "")
+        f := 0
+        while f < len(t.footer) {
+            fb = vec.push(fb, t.footer[f])
+            f = f + 1
+        }
+        t.footer = fb
+    }
+    t
+}
+
+// One grid cell with headers as row -1. Short rows and missing cells
+// read as "" so ragged tables transpose cleanly.
+
+func grid_at(t: Table, r: int, c: int) -> str {
+    if r < 0 {
+        if c >= 0 && c < len(t.headers) {
+            return t.headers[c]
+        }
+        return ""
+    }
+    if r < len(t.rows) && c >= 0 && c < len(t.rows[r]) {
+        return t.rows[r][c]
+    }
+    ""
+}
+
+/// Transpose rows and columns: headers become the first row, the old
+/// first column becomes the new headers. Display settings (style,
+/// padding, title, caption, borders, caps, paging) carry over;
+/// per-column alignment resets to auto and the footer is dropped
+/// (it has no meaningful transposed position).
+
+pub func transpose(t: Table) -> Table {
+    ncols := col_count(t)
+    if ncols == 0 {
+        hd:[str] = []
+        return new(hd)
+    }
+    nh:[str] = []
+    r := 0 - 1
+    nr := len(t.rows)
+    while r < nr {
+        nh = vec.push(nh, grid_at(t, r, 0))
+        r = r + 1
+    }
+    out := new(nh)
+    c := 1
+    while c < ncols {
+        buf:[str] = []
+        r = 0 - 1
+        while r < nr {
+            buf = vec.push(buf, grid_at(t, r, c))
+            r = r + 1
+        }
+        out = add_row(out, buf)
+        c = c + 1
+    }
+    out.style = t.style
+    out.padding = t.padding
+    out.title = t.title
+    out.caption = t.caption
+    out.header_align = t.header_align
+    out.row_lines = t.row_lines
+    out.outer_border = t.outer_border
+    out.header_line = t.header_line
+    out.max_width = t.max_width
+    out.max_rows = t.max_rows
+    out
+}
+
+func drop_str(xs: [str], at: int) -> [str] {
+    out:[str] = []
+    i := 0
+    while i < len(xs) {
+        if i != at {
+            out = vec.push(out, xs[i])
+        }
+        i = i + 1
+    }
+    out
+}
+
+func drop_int(xs: [int], at: int) -> [int] {
+    out:[int] = []
+    i := 0
+    while i < len(xs) {
+        if i != at {
+            out = vec.push(out, xs[i])
+        }
+        i = i + 1
+    }
+    out
+}
+
+/// Drop one column from headers, every row, footer, and spans.
+/// Out-of-range indices are ignored. Repeated hides compose: indices
+/// always refer to the current table.
+
+pub func hide_col(t: Table, col: int) -> Table {
+    if col < 0 {
+        return t
+    }
+    if col >= col_count(t) {
+        return t
+    }
+    t.headers = drop_str(t.headers, col)
+    t.aligns = drop_str(t.aligns, col)
+    t.col_caps = drop_int(t.col_caps, col)
+    t.footer = drop_str(t.footer, col)
+    r := 0
+    while r < len(t.rows) {
+        t.rows[r] = drop_str(t.rows[r], col)
+        r = r + 1
+    }
+    t
+}
+
+// One CSV field: quote when the cell holds a comma or quote, double
+// any embedded quotes. Cells are pre-sanitized, so no newlines occur.
+
+func csv_field(s: str) -> str {
+    has_comma := len(str.split(s, ",")) > 1
+    has_quote := len(str.split(s, "\"")) > 1
+    if has_comma == false && has_quote == false {
+        return s
+    }
+    "\"" + str.replace(s, "\"", "\"\"") + "\""
+}
+
+/// Full data as CSV text: headers, every body row, then the footer.
+/// Always complete (paging and truncation never apply); the `… +N more`
+/// note is a display artifact and is excluded. Cells export sanitized
+/// and untruncated.
+
+pub func to_csv(t: Table) -> str {
+    ncols := col_count(t)
+    lines:[str] = []
+    h:[str] = []
+    i := 0
+    while i < ncols {
+        if i < len(t.headers) {
+            h = vec.push(h, csv_field(text.sanitize(t.headers[i])))
+        } else {
+            h = vec.push(h, "")
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, vec.join(h, ","))
+    r := 0
+    while r < len(t.rows) {
+        cells:[str] = []
+        i = 0
+        while i < ncols {
+            if i < len(t.rows[r]) {
+                cells = vec.push(cells, csv_field(text.sanitize(t.rows[r][i])))
+            } else {
+                cells = vec.push(cells, "")
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, vec.join(cells, ","))
+        r = r + 1
+    }
+    if len(t.footer) > 0 {
+        cells:[str] = []
+        i = 0
+        while i < ncols {
+            if i < len(t.footer) {
+                cells = vec.push(cells, csv_field(text.sanitize(t.footer[i])))
+            } else {
+                cells = vec.push(cells, "")
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, vec.join(cells, ","))
+    }
+    vec.join(lines, "\n") + "\n"
+}
+
+// One JSON string value: escape backslashes first, then quotes.
+// Cells are pre-sanitized, so no control characters occur.
+
+func json_field(s: str) -> str {
+    e := str.replace(s, "\\", "\\\\")
+    e = str.replace(e, "\"", "\\\"")
+    "\"" + e + "\""
+}
+
+/// Full data as a JSON array of objects keyed by headers: body rows
+/// only (the footer is a display total). Short rows fill `""`;
+/// cells past the headers are dropped. Sanitized, untruncated.
+
+pub func to_json(t: Table) -> str {
+    nk := len(t.headers)
+    objs:[str] = []
+    r := 0
+    while r < len(t.rows) {
+        pairs:[str] = []
+        k := 0
+        while k < nk {
+            v := ""
+            if k < len(t.rows[r]) {
+                v = text.sanitize(t.rows[r][k])
+            }
+            pairs = vec.push(pairs, json_field(t.headers[k]) + ": " + json_field(v))
+            k = k + 1
+        }
+        objs = vec.push(objs, "{" + vec.join(pairs, ", ") + "}")
+        r = r + 1
+    }
+    "[" + vec.join(objs, ", ") + "]"
+}
+
+/// Headers plus every body row, as plain rows. Round-trips with
+/// `from_rows`; the footer stays out (it belongs to display).
+
+pub func to_rows(t: Table) -> [[str]] {
+    out:[[str]] = []
+    out = vec.push(out, headers(t))
+    r := 0
+    while r < len(t.rows) {
+        out = vec.push(out, row(t, r))
+        r = r + 1
+    }
+    out
+}
+
+/// Switch border style. Unknown names fall back to "rounded".
+/// See `styles()` for the full list.
+
+pub func set_style(t: Table, name: str) -> Table {
+    t.style = theme.style_name(name)
+    t
+}
+
+/// Set one column's alignment: "left" | "center" | "right".
+/// Out-of-range columns and bad modes are ignored (no panic).
+
+pub func set_align(t: Table, col: int, mode: str) -> Table {
+    m := theme.align_name(mode)
+    if col < 0 {
+        return t
+    }
+    if col >= len(t.aligns) {
+        return t
+    }
+    t.aligns[col] = m
+    t
+}
+
+/// Set every column's alignment at once. Sticky: columns added later
+/// inherit this mode.
+
+pub func set_align_all(t: Table, mode: str) -> Table {
+    m := theme.align_name(mode)
+    t.def_align = m
+    i := 0
+    n := len(t.aligns)
+    while i < n {
+        t.aligns[i] = m
+        i = i + 1
+    }
+    t
+}
+
+/// Set header alignment independently from body cells: "left" |
+/// "center" | "right" | "auto" (default: follow each column).
+/// Unknown modes fall back to "left", like `set_align`.
+
+pub func set_header_align(t: Table, mode: str) -> Table {
+    t.header_align = theme.align_name(mode)
+    t
+}
+
+/// Cell padding per side (spaces). Clamped to 0..8.
+
+pub func set_padding(t: Table, n: int) -> Table {
+    p := n
+    if p < 0 {
+        p = 0
+    }
+    if p > 8 {
+        p = 8
+    }
+    t.padding = p
+    t
+}
+
+/// Centered title printed above the table. Empty hides it.
+
+pub func set_title(t: Table, title: str) -> Table {
+    t.title = title
+    t
+}
+
+/// Caption line printed below the table (sources, units, footnotes).
+/// Sanitized like cells, so embedded newlines cannot break the grid.
+/// Empty hides it.
+
+pub func set_caption(t: Table, caption: str) -> Table {
+    t.caption = caption
+    t
+}
+
+/// Footer row (e.g. totals). Rendered after a separator, before the
+/// bottom border. Empty hides it.
+
+pub func set_footer(t: Table, footer: [str]) -> Table {
+    t.footer = footer
+    i := len(t.aligns)
+    m := len(footer)
+    while i < m {
+        t.aligns = vec.push(t.aligns, t.def_align)
+        t.col_caps = vec.push(t.col_caps, 0)
+        i = i + 1
+    }
+    t
+}
+
+/// Cap every column's visible width. Cells longer than `n` render
+/// truncated with a trailing `…`. `0` (default) means unlimited.
+/// Negative values are treated as `0`.
+
+pub func set_max_width(t: Table, n: int) -> Table {
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.max_width = m
+    t
+}
+
+/// Cap the rendered body rows. Overflow collapses into a trailing
+/// `… +N more` note row. `0` (default) means unlimited. Negative
+/// values are treated as `0`.
+
+pub func set_max_rows(t: Table, n: int) -> Table {
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.max_rows = m
+    t
+}
+
+/// Skip the first `n` body rows (paging partner for `set_max_rows`).
+/// The trailing note counts all hidden rows, above and below.
+/// Negative values are treated as `0`; past-the-end renders headers
+/// (plus note and footer) with an empty body.
+
+pub func set_row_offset(t: Table, n: int) -> Table {
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.row_offset = m
+    t
+}
+
+/// Cap one column's visible width (overrides `set_max_width` for that
+/// column). Out-of-range columns are ignored. `0` clears the cap.
+
+pub func set_col_max_width(t: Table, col: int, n: int) -> Table {
+    if col < 0 {
+        return t
+    }
+    if col >= len(t.col_caps) {
+        return t
+    }
+    m := n
+    if m < 0 {
+        m = 0
+    }
+    t.col_caps[col] = m
+    t
+}
+
+/// Draw a separator between every data row (default: only under the
+/// header and above the footer).
+
+pub func set_row_lines(t: Table, on: bool) -> Table {
+    t.row_lines = on
+    t
+}
+
+/// Show or hide the outer frame (top/bottom rules and side borders).
+/// Inner column separators stay. Markdown drops its edge pipes
+/// (still valid markdown); minimal has no frame, so this is a no-op
+/// there. Default: shown.
+
+pub func set_outer_border(t: Table, on: bool) -> Table {
+    t.outer_border = on
+    t
+}
+
+/// Show or hide the separator between header and body. Hiding it
+/// merges header and rows into one unruled block. Default: shown.
+
+pub func set_header_line(t: Table, on: bool) -> Table {
+    t.header_line = on
+    t
+}

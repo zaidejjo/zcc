@@ -3,6 +3,8 @@ import std.colors
 import std.str
 import std.vec
 
+import table
+
 pub func noop() {
     
     
@@ -39,10 +41,11 @@ pub struct Theme {
     total: str,
     names: [str],
     specs: [str],
+    style: str,
 }
 
 pub func default_theme() -> Theme {
-    Theme{color: true, header: "cyan", language: "green", total: "cyan", names: [], specs: []}
+    Theme{color: true, header: "cyan", language: "green", total: "cyan", names: [], specs: [], style: "rounded"}
 }
 
 // Cross-module constructor (struct literals are same-module only).
@@ -50,11 +53,11 @@ pub func default_theme() -> Theme {
 // field directly from a bool parameter miscompiles in AOT
 // (`zz_bool(boxed)`; toolchain bug), so keep params out of struct inits.
 
-pub func make_theme(color: bool, header: str, language: str, total: str, names: [str], specs: [str]) -> Theme {
+pub func make_theme(color: bool, header: str, language: str, total: str, names: [str], specs: [str], style: str) -> Theme {
     if color {
-        return Theme{color: true, header: header, language: language, total: total, names: names, specs: specs}
+        return Theme{color: true, header: header, language: language, total: total, names: names, specs: specs, style: style}
     }
-    Theme{color: false, header: header, language: language, total: total, names: names, specs: specs}
+    Theme{color: false, header: header, language: language, total: total, names: names, specs: specs, style: style}
 }
 
 pub func theme_lang_color(th: Theme, lang: str) -> str {
@@ -212,15 +215,48 @@ pub func add_row(t: Table, lang: str, files: int, lines: int, code: int, comment
     t
 }
 
-// Sort by code desc (bubble, n small).
+// Display names: canonical keys stay machine-readable (Css, Json)
+// while the table shows the conventional acronym casing (CSS, JSON).
 
-pub func sort_table(t: Table) -> Table {
+pub func display_name(lang: str) -> str {
+    for pair in display_map() {
+        if pair[0] == lang {
+            return pair[1]
+        }
+    }
+    lang
+}
+
+// Display names: canonical keys stay machine-readable (Css, Json)
+// while the table shows conventional spellings (CSS, C#, ...).
+// Data-driven pair list, same linear-scan convention as
+// languages.is_one_of.
+
+func display_map() -> [[str]] {
+    [["Css", "CSS"], ["Svg", "SVG"], ["Json", "JSON"], ["Toml", "TOML"], ["Html", "HTML"], ["Xml", "XML"], ["Yaml", "YAML"], ["Sql", "SQL"], ["CSharp", "C#"], ["Cpp", "C++"], ["CppHeader", "C++ Header"], ["CHeader", "C Header"], ["FSharp", "F#"], ["Jsx", "JSX"], ["Tsx", "TSX"], ["Mdx", "MDX"], ["VimScript", "Vim Script"], ["ObjectiveC", "Objective-C"], ["ObjectiveCpp", "Objective-C++"], ["Scss", "SCSS"], ["Protobuf", "Protocol Buffers"]]
+}
+
+// Sort by any column, descending unless rev. Bubble, n small.
+
+pub func sort_table(t: Table, key: str, rev: bool) -> Table {
     n := len(t.langs)
     i := 0
     while i < n {
         j := i + 1
         while j < n {
-            if t.code[j] > t.code[i] {
+            a := col_val(t, key, i)
+            b := col_val(t, key, j)
+            swap := false
+            if rev {
+                if b < a {
+                    swap = true
+                }
+            } else {
+                if b > a {
+                    swap = true
+                }
+            }
+            if swap {
                 tmp := t.langs[i]
                 t.langs[i] = t.langs[j]
                 t.langs[j] = tmp
@@ -245,6 +281,22 @@ pub func sort_table(t: Table) -> Table {
         i = i + 1
     }
     t
+}
+
+func col_val(t: Table, key: str, i: int) -> int {
+    if key == "files" {
+        return t.files[i]
+    }
+    if key == "lines" {
+        return t.lines[i]
+    }
+    if key == "comments" {
+        return t.comments[i]
+    }
+    if key == "blanks" {
+        return t.blanks[i]
+    }
+    t.code[i]
 }
 
 pub func totals(t: Table) -> [int] {
@@ -272,54 +324,79 @@ pub func totals(t: Table) -> [int] {
 }
 
 pub func print_table(t: Table, th: Theme) {
-    print_table_full(t, new_table(), th)
+    print_table_full(t, new_table(), th, "code", false)
 }
 
-// Full table: main languages, Total closes the table. Embedded
-// Markdown-fence code always gets its own section afterwards (inline
-// nesting breaks column alignment, so it never renders in-tree).
+// Language cell text (colored display name, never padded — the table
+// package measures visible widths, ANSI-safe).
 
-pub func print_table_full(t: Table, emb: Table, th: Theme) {
-    t = sort_table(t)
-    tot := totals(t)
-    // header
-    bar := "────────────────────────────────────────────────────────────────"
-    println(bar)
-    h1 := pad_r("Language", 16)
-    h2 := pad_l("Files", 8)
-    h3 := pad_l("Lines", 10)
-    h4 := pad_l("Code", 10)
-    h5 := pad_l("Comments", 10)
-    h6 := pad_l("Blanks", 10)
-    println(maybe_bold(th, apply_color(th, th.header, "{h1}{h2}{h3}{h4}{h5}{h6}")))
-    println(bar)
-    for i in 0..len(t.langs) {
-        lang := t.langs[i]
-        c1 := pad_r(lang, 16)
-        c2 := pad_l(str(t.files[i]), 8)
-        c3 := pad_l(str(t.lines[i]), 10)
-        c4 := pad_l(str(t.code[i]), 10)
-        c5 := pad_l(str(t.comments[i]), 10)
-        c6 := pad_l(str(t.blanks[i]), 10)
-        line := "{c1}{c2}{c3}{c4}{c5}{c6}"
-        if is_plain_lang(th, lang) {
-            println(line)
-        } else {
-            println(lang_cell(th, lang, c1) + "{c2}{c3}{c4}{c5}{c6}")
-        }
+func lang_text(th: Theme, lang: str) -> str {
+    show := display_name(lang)
+    if is_plain_lang(th, lang) {
+        return show
     }
-    println(bar)
-    tc1 := pad_r("Total", 16)
-    tc2 := pad_l(str(tot[0]), 8)
-    tc3 := pad_l(str(tot[1]), 10)
-    tc4 := pad_l(str(tot[2]), 10)
-    tc5 := pad_l(str(tot[3]), 10)
-    tc6 := pad_l(str(tot[4]), 10)
-    println(maybe_bold(th, apply_color(th, th.total, "{tc1}{tc2}{tc3}{tc4}{tc5}{tc6}")))
-    println(bar)
-    if find_lang(t, "Markdown") >= 0 && len(emb.langs) > 0 {
+    lang_cell(th, lang, show)
+}
+
+func head_cells(th: Theme, headers: [str]) -> [str] {
+    out := []
+    for h in headers {
+        out = vec.push(out, maybe_bold(th, apply_color(th, th.header, h)))
+    }
+    out
+}
+
+func num_cells(vals: [int]) -> [str] {
+    out := []
+    for v in vals {
+        out = vec.push(out, str(v))
+    }
+    out
+}
+
+// Full table: main languages, embedded-code section, Total closes the
+// table last. The embedded section sits ABOVE Total as its own bordered
+// block (inline nesting would break column alignment, so fence code
+// never renders in-tree).
+
+pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool) {
+    t = sort_table(t, sort, rev)
+    tot := totals(t)
+    bt := table.new(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]))
+    bt = table.set_style(bt, th.style)
+    for c in 1..6 {
+        bt = table.set_align(bt, c, "right")
+    }
+    for i in 0..len(t.langs) {
+        bt = table.add_row(bt, [lang_text(th, t.langs[i]), str(t.files[i]), str(t.lines[i]), str(t.code[i]), str(t.comments[i]), str(t.blanks[i])])
+    }
+    bt = table.set_footer(bt, [maybe_bold(th, apply_color(th, th.total, "Total")), maybe_bold(th, apply_color(th, th.total, str(tot[0]))), maybe_bold(th, apply_color(th, th.total, str(tot[1]))), maybe_bold(th, apply_color(th, th.total, str(tot[2]))), maybe_bold(th, apply_color(th, th.total, str(tot[3]))), maybe_bold(th, apply_color(th, th.total, str(tot[4])))])
+    println(table.render(bt))
+    if len(emb.langs) > 0 {
         print_emb_section(emb, th)
     }
+}
+
+// Languages whose bodies extract embedded child rows (Markdown fences,
+// component islands, notebook cells). Single predicate so the parallel
+// worker, both mergers, and tests agree.
+
+pub func has_emb(lang: str) -> bool {
+    lang == "Markdown" || lang == "Astro" || lang == "Vue" || lang == "Svelte" || lang == "Mdx" || lang == "Jupyter"
+}
+
+// Drop one language's rows (for --no-generated). Totals recompute
+// downstream, so the table stays balanced.
+
+pub func filter_lang(t: Table, drop: str) -> Table {
+    out := new_table()
+    for i in 0..len(t.langs) {
+        if t.langs[i] == drop {
+            continue
+        }
+        out = add_row(out, t.langs[i], t.files[i], t.lines[i], t.code[i], t.comments[i], t.blanks[i])
+    }
+    out
 }
 
 // Display prefix ("└ Rust") back to the language name for override
@@ -387,34 +464,21 @@ pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int]
         return
     }
     shown := len(idx)
-    println("")
-    println(" Top {shown} files by lines")
-    f0 := pad_r("File", 44)
-    f1 := pad_r("Language", 12)
-    f2 := pad_l("Lines", 10)
-    f3 := pad_l("Code", 10)
-    f4 := pad_l("Comments", 10)
-    f5 := pad_l("Blanks", 10)
-    println(maybe_bold(th, apply_color(th, th.header, "{f0}{f1}{f2}{f3}{f4}{f5}")))
+    bt := table.new(head_cells(th, ["File", "Language", "Lines", "Code", "Comments", "Blanks"]))
+    bt = table.set_style(bt, th.style)
+    bt = table.set_title(bt, "Top {shown} files by lines")
+    for c in 2..6 {
+        bt = table.set_align(bt, c, "right")
+    }
     for k in idx {
         rel := paths[k]
         prefix := root + "/"
         if str.starts_with(rel, prefix) {
             rel = rel[len(prefix):len(rel)]
         }
-        c0 := pad_r(display_path(rel), 44)
-        c1 := pad_r(langs[k], 12)
-        c2 := pad_l(str(lines[k]), 10)
-        c3 := pad_l(str(code[k]), 10)
-        c4 := pad_l(str(comments[k]), 10)
-        c5 := pad_l(str(blanks[k]), 10)
-        line := "{c0}{c1}{c2}{c3}{c4}{c5}"
-        if is_plain_lang(th, langs[k]) {
-            println(line)
-        } else {
-            println(c0 + lang_cell(th, langs[k], c1) + "{c2}{c3}{c4}{c5}")
-        }
+        bt = table.add_row(bt, [display_path(rel), lang_text(th, langs[k]), str(lines[k]), str(code[k]), str(comments[k]), str(blanks[k])])
     }
+    println(table.render(bt))
 }
 
 pub func print_emb_section(emb: Table, th: Theme) {
@@ -426,18 +490,15 @@ pub func print_emb_section(emb: Table, th: Theme) {
     for i in 0..len(emb.langs) {
         t = add_row(t, emb.langs[i], emb.files[i], emb.lines[i], emb.code[i], emb.comments[i], emb.blanks[i])
     }
-    t = sort_table(t)
-    println("")
-    println(" Markdown (embedded code)")
+    t = sort_table(t, "code", false)
+    bt := table.new(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]))
+    bt = table.set_style(bt, th.style)
+    bt = table.set_title(bt, "Embedded code")
+    for c in 1..6 {
+        bt = table.set_align(bt, c, "right")
+    }
     for i in 0..len(t.langs) {
         lang := emb_base_lang(t.langs[i])
-        c1 := pad_r(" " + lang, 16)
-        c2 := pad_l(str(t.files[i]), 8)
-        c3 := pad_l(str(t.lines[i]), 10)
-        c4 := pad_l(str(t.code[i]), 10)
-        c5 := pad_l(str(t.comments[i]), 10)
-        c6 := pad_l(str(t.blanks[i]), 10)
-        line := "{c1}{c2}{c3}{c4}{c5}{c6}"
         // section rows follow per-language overrides, else the default
         // language hue (never plain: the section is opt-in detail).
         // dimmed to set the section apart from the main table.
@@ -445,21 +506,15 @@ pub func print_emb_section(emb: Table, th: Theme) {
         if spec == "" {
             spec = th.language
         }
+        c1 := display_name(lang)
         if th.color {
-            println(colors.dim(maybe_bold(th, apply_color(th, spec, c1))) + "{c2}{c3}{c4}{c5}{c6}")
-        } else {
-            println(line)
+            c1 = colors.dim(maybe_bold(th, apply_color(th, spec, c1)))
         }
+        bt = table.add_row(bt, [c1, str(t.files[i]), str(t.lines[i]), str(t.code[i]), str(t.comments[i]), str(t.blanks[i])])
     }
     tot := totals(t)
-    // "└" is 3 bytes / 1 column: over-pad by 2 so the row spans 16 columns.
-    c1 := pad_r(" └ (Total)", 18)
-    c2 := pad_l(str(tot[0]), 8)
-    c3 := pad_l(str(tot[1]), 10)
-    c4 := pad_l(str(tot[2]), 10)
-    c5 := pad_l(str(tot[3]), 10)
-    c6 := pad_l(str(tot[4]), 10)
-    println("{c1}{c2}{c3}{c4}{c5}{c6}")
+    bt = table.set_footer(bt, [maybe_bold(th, apply_color(th, th.total, "Total")), str(tot[0]), str(tot[1]), str(tot[2]), str(tot[3]), str(tot[4])])
+    println(table.render(bt))
 }
 
 // JSON export (--output json). Manual build for full control.
@@ -471,14 +526,14 @@ pub func escape_json(s: str) -> str {
     e
 }
 
-pub func to_json(t: Table) -> str {
-    "{" + json_tables(t) + "}"
+pub func to_json(t: Table, emb: Table) -> str {
+    "{" + json_tables(t) + json_emb(emb) + "}"
 }
 
 // Same document plus a top-n files array (for --by-file).
 
-pub func to_json_full(t: Table, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int) -> str {
-    out:str = "{" + json_tables(t)
+pub func to_json_full(t: Table, emb: Table, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int) -> str {
+    out:str = "{" + json_tables(t) + json_emb(emb)
     idx := top_by_lines(lines, topn)
     out = out + ",\"files\":["
     first:bool = true
@@ -496,7 +551,7 @@ pub func to_json_full(t: Table, paths: [str], langs: [str], lines: [int], code: 
 }
 
 func json_tables(t: Table) -> str {
-    t = sort_table(t)
+    t = sort_table(t, "code", false)
     tot := totals(t)
     // NOTE: explicit annotations — the AOT inferencer once resolved `out`
     // as bool here (order-dependent; printed "false"). Pinned until the
@@ -512,5 +567,25 @@ func json_tables(t: Table) -> str {
         out = out + "\"{lang}\":{\"files\":{t.files[i]},\"lines\":{t.lines[i]},\"code\":{t.code[i]},\"comments\":{t.comments[i]},\"blanks\":{t.blanks[i]}}"
     }
     out = out + "},\"total\":{\"files\":{tot[0]},\"lines\":{tot[1]},\"code\":{tot[2]},\"comments\":{tot[3]},\"blanks\":{tot[4]}}"
+    out
+}
+
+func json_emb(emb: Table) -> str {
+    t := new_table()
+    for i in 0..len(emb.langs) {
+        t = add_row(t, emb_base_lang(emb.langs[i]), emb.files[i], emb.lines[i], emb.code[i], emb.comments[i], emb.blanks[i])
+    }
+    t = sort_table(t, "code", false)
+    out:str = ",\"embedded\":{"
+    first:bool = true
+    for i in 0..len(t.langs) {
+        if !first {
+            out = out + ","
+        }
+        first = false
+        lang := escape_json(t.langs[i])
+        out = out + "\"{lang}\":{\"files\":{t.files[i]},\"lines\":{t.lines[i]},\"code\":{t.code[i]},\"comments\":{t.comments[i]},\"blanks\":{t.blanks[i]}}"
+    }
+    out = out + "}"
     out
 }

@@ -1,0 +1,111 @@
+// zcc/src/diff.zz — git-aware per-language diff stats.
+//
+// `zcc diff [BASE]` (default HEAD): runs `git diff --numstat` and
+// aggregates added/removed lines per language using the same resolver
+// as counting (unknown extensions skipped, same as the main table).
+// Binary files (`- -` counts) and renames (shown as delete+add by
+// numstat without -M) are skipped/noted, not misattributed.
+import std.process
+import std.str
+import std.vec
+
+import config
+import languages
+import report
+import table
+
+pub func run_diff(base: str) {
+    if base == "" {
+        base = "HEAD"
+    }
+    out := ""
+    match process.run("git", ["diff", "--numstat", base]) {
+        .err(e) => {
+            println("zcc: git diff failed: {e} (not a git repo?)")
+            return
+        }
+        .ok(t) => {
+            out = t[1]
+            if t[0] != 0 {
+                println("zcc: git diff exited {t[0]}")
+                return
+            }
+        }
+    }
+    cfg := config.load_config()
+    table := config.lang_table_with(cfg)
+    em := languages.build_ext_map(table)
+    res := diff_stats(em, out)
+    if res.nfiles == 0 {
+        println("zcc: no countable changes vs {base}")
+        return
+    }
+    print_diff_table(res.t, res.added, res.removed, res.nfiles, base)
+}
+
+pub struct DiffStat {
+    nfiles: int,
+    t: report.Table,
+    added: [int],
+    removed: [int],
+}
+
+// Aggregate numstat text. Pure function of inputs (testable without git).
+
+pub func diff_stats(em: languages.ExtMap, out: str) -> DiffStat {
+    t := report.new_table()
+    added := []
+    removed := []
+    nfiles := 0
+    for raw in str.split(out, "\n") {
+        if raw == "" {
+            continue
+        }
+        parts := str.split(raw, "\t")
+        if len(parts) < 3 {
+            continue
+        }
+        if parts[0] == "-" {
+            continue
+        }
+        path := parts[2]
+        lang := languages.resolve_fast(em, path)
+        if lang == "" {
+            continue
+        }
+        a := int(parts[0]) ?? 0
+        r := int(parts[1]) ?? 0
+        idx := report.find_lang(t, lang)
+        if idx < 0 {
+            t = report.add_row(t, lang, 1, 0, 0, 0, 0)
+            added = vec.push(added, a)
+            removed = vec.push(removed, r)
+        } else {
+            t.files[idx] = t.files[idx] + 1
+            added[idx] = added[idx] + a
+            removed[idx] = removed[idx] + r
+        }
+        nfiles = nfiles + 1
+    }
+    DiffStat{nfiles: nfiles, t: t, added: added, removed: removed}
+}
+
+func print_diff_table(t: report.Table, added: [int], removed: [int], nfiles: int, base: str) {
+    // Sort by added desc via index pick (reuse top_by_lines on added).
+    idx := report.top_by_lines(added, len(added))
+    th := report.default_theme()
+    bt := table.new(["Language", "Files", "Added", "Removed"])
+    bt = table.set_style(bt, th.style)
+    for c in 1..4 {
+        bt = table.set_align(bt, c, "right")
+    }
+    ta := 0
+    tr := 0
+    for k in idx {
+        bt = table.add_row(bt, [report.display_name(t.langs[k]), str(t.files[k]), "+" + str(added[k]), "-" + str(removed[k])])
+        ta = ta + added[k]
+        tr = tr + removed[k]
+    }
+    bt = table.set_footer(bt, ["Total", str(nfiles), "+" + str(ta), "-" + str(tr)])
+    println(table.render(bt))
+}

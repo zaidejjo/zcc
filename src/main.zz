@@ -10,9 +10,11 @@ import std.sys
 import std.task
 import std.vec
 
+import blame
 import cache
 import config
 import counter
+import diff
 import languages
 import parallel
 import report
@@ -43,6 +45,10 @@ func print_help() {
     println("    --no-ignore         skip .gitignore rules (still skips .git)")
     println("    --no-cache          skip the count cache (always recount)")
     println("    --only LANG         count only this language (e.g. Rust)")
+    println("    --sort KEY          sort table by code|lines|files|comments|blanks (default code, desc; prefix - for asc)")
+    println("    --reverse           ascending sort order")
+    println("    --style NAME        table style: rounded|sharp|heavy|double|markdown|minimal|ascii (default rounded)")
+    println("    --no-generated      hide Generated rows (totals recompute)")
     println("    --force             with init: overwrite existing config")
     println("    --by-file           list top files by lines after the table")
     println("    --top N             files shown with --by-file (default 20)")
@@ -62,6 +68,8 @@ func print_help() {
     println("")
     println("EXAMPLES:")
     println("    zcc init            write ~/.config/zcc/config.json")
+    println("    zcc diff [BASE]     per-language added/removed vs BASE (default HEAD)")
+    println("    zcc blame [path]    per-author line share via git blame")
     println("    zcc .")
     println("    zcc src/ --only Rust")
     println("    zcc . --output json > counts.json")
@@ -78,6 +86,11 @@ func main(cli_args: [str]) {
     by_file := false
     topn := 20
     top_next := false
+    style_next := false
+    sort := "code"
+    rev := false
+    style := "rounded"
+    no_generated := false
     only := ""
     show_help := false
     show_ver := false
@@ -145,6 +158,46 @@ func main(cli_args: [str]) {
         if a == "json" && out_json {
             continue
         }
+        if str.starts_with(a, "--sort=") {
+            parts := str.split(a, "=")
+            if len(parts) > 1 {
+                v := parts[1]
+                if str.starts_with(v, "-") {
+                    rev = true
+                    v = v[1:]
+                }
+                if v == "code" || v == "lines" || v == "files" || v == "comments" || v == "blanks" {
+                    sort = v
+                } else {
+                    println("unknown --sort key: {v} (code|lines|files|comments|blanks)")
+                }
+            }
+            continue
+        }
+        if a == "--reverse" {
+            rev = true
+            continue
+        }
+        if str.starts_with(a, "--style=") {
+            parts := str.split(a, "=")
+            if len(parts) > 1 {
+                style = parts[1]
+            }
+            continue
+        }
+        if a == "--style" {
+            style_next = true
+            continue
+        }
+        if style_next {
+            style = a
+            style_next = false
+            continue
+        }
+        if a == "--no-generated" {
+            no_generated = true
+            continue
+        }
         if str.starts_with(a, "--only=") {
             parts := str.split(a, "=")
             if len(parts) > 1 {
@@ -191,6 +244,41 @@ func main(cli_args: [str]) {
         println(config.init_config(languages.config_dir(), force))
         return
     }
+    // diff subcommand: `zcc diff [BASE]` (default HEAD). The token after
+    // `diff` is the base ref, not a path.
+    if target == "diff" {
+        base := "HEAD"
+        for a in cli_args {
+            if a == "diff" || a == "--" {
+                continue
+            }
+            if str.starts_with(a, "--") {
+                continue
+            }
+            if a != "." {
+                base = a
+                break
+            }
+        }
+        diff.run_diff(base)
+        return
+    }
+    // blame subcommand: `zcc blame [path]` (default .).
+    if target == "blame" {
+        broot := "."
+        for a in cli_args {
+            if a == "blame" || a == "--" {
+                continue
+            }
+            if str.starts_with(a, "--") {
+                continue
+            }
+            broot = a
+            break
+        }
+        blame.run_blame(broot)
+        return
+    }
     // resolve target
     root := target
     if root == "" {
@@ -205,7 +293,7 @@ func main(cli_args: [str]) {
         println("zcc: path not found: {root}")
         return
     }
-    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn)
+    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn, sort, rev, no_generated, style)
 }
 
 func run_single(path: str, only: str, out_json: bool) {
@@ -234,7 +322,7 @@ func run_single(path: str, only: str, out_json: bool) {
             t := report.new_table()
             t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
             if out_json {
-                println(report.to_json(t))
+                println(report.to_json(t, report.new_table()))
             } else {
                 report.print_table(t, th)
             }
@@ -243,7 +331,7 @@ func run_single(path: str, only: str, out_json: bool) {
     }
 }
 
-func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int) {
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int, sort: str, rev: bool, no_generated: bool, style: str) {
     pats := walker.load_patterns(root)
     // Worker budget shared by walk fan-out and count fan-out below.
     nworkers := sys.cpu_count()
@@ -256,6 +344,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     files := walker.walk_files_par(root, pats, use_ignore, include_hidden, nworkers)
     cfg := config.load_config()
     th := config.build_theme(cfg)
+    th = report.make_theme(th.color, th.header, th.language, th.total, th.names, th.specs, style)
     table := config.lang_table_with(cfg)
     customs := config.custom_names(cfg)
     em := languages.build_ext_map(table)
@@ -400,20 +489,25 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
             if res.oks[j] == 0 {
                 continue
             }
-            t = report.add_row(t, mshows[j], 1, res.lines[j], res.code[j], res.comments[j], res.blanks[j])
+            show := mshows[j]
+            if res.gens[j] == 1 {
+                show = "Generated"
+            }
+            t = report.add_row(t, show, 1, res.lines[j], res.code[j], res.comments[j], res.blanks[j])
             counted = counted + 1
             if by_file {
                 p := fpos[j]
+                flangs[p] = show
                 flines[p] = res.lines[j]
                 fcode[p] = res.code[j]
                 fcomments[p] = res.comments[j]
                 fblanks[p] = res.blanks[j]
             }
-            if mlangs[j] == "Markdown" && mshows[j] == "Markdown" {
+            if report.has_emb(mlangs[j]) && show == mlangs[j] {
                 emb = cache.merge_emb_enc(emb, res.fencs[j])
             }
             if use_cache {
-                saverows = vec.push(saverows, cache.enc_entry(mpaths[j], msig0[j], msig1[j], mshows[j], res.lines[j], res.code[j], res.comments[j], res.blanks[j], res.fencs[j]))
+                saverows = vec.push(saverows, cache.enc_entry(mpaths[j], msig0[j], msig1[j], show, res.lines[j], res.code[j], res.comments[j], res.blanks[j], res.fencs[j]))
             }
         }
     }
@@ -453,20 +547,25 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
                     continue
                 }
                 idx := base + j
-                t = report.add_row(t, mshows[idx], 1, res.lines[j], res.code[j], res.comments[j], res.blanks[j])
+                show := mshows[idx]
+                if res.gens[j] == 1 {
+                    show = "Generated"
+                }
+                t = report.add_row(t, show, 1, res.lines[j], res.code[j], res.comments[j], res.blanks[j])
                 counted = counted + 1
                 if by_file {
                     p := fpos[idx]
+                    flangs[p] = show
                     flines[p] = res.lines[j]
                     fcode[p] = res.code[j]
                     fcomments[p] = res.comments[j]
                     fblanks[p] = res.blanks[j]
                 }
-                if mlangs[idx] == "Markdown" && mshows[idx] == "Markdown" {
+                if report.has_emb(mlangs[idx]) && show == mlangs[idx] {
                     emb = cache.merge_emb_enc(emb, res.fencs[j])
                 }
                 if use_cache {
-                    saverows = vec.push(saverows, cache.enc_entry(mpaths[idx], msig0[idx], msig1[idx], mshows[idx], res.lines[j], res.code[j], res.comments[j], res.blanks[j], res.fencs[j]))
+                    saverows = vec.push(saverows, cache.enc_entry(mpaths[idx], msig0[idx], msig1[idx], show, res.lines[j], res.code[j], res.comments[j], res.blanks[j], res.fencs[j]))
                 }
             }
         }
@@ -484,14 +583,42 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         println("zcc: no countable files under {root}")
         return
     }
+    if no_generated {
+        t = report.filter_lang(t, "Generated")
+        if by_file {
+            fp := []
+            fl := []
+            fn_ := []
+            fc := []
+            fm := []
+            fb := []
+            for k in 0..len(fpaths) {
+                if flangs[k] == "Generated" {
+                    continue
+                }
+                fp = vec.push(fp, fpaths[k])
+                fl = vec.push(fl, flangs[k])
+                fn_ = vec.push(fn_, flines[k])
+                fc = vec.push(fc, fcode[k])
+                fm = vec.push(fm, fcomments[k])
+                fb = vec.push(fb, fblanks[k])
+            }
+            fpaths = fp
+            flangs = fl
+            flines = fn_
+            fcode = fc
+            fcomments = fm
+            fblanks = fb
+        }
+    }
     if out_json {
         if by_file {
-            println(report.to_json_full(t, fpaths, flangs, flines, fcode, fcomments, fblanks, topn))
+            println(report.to_json_full(t, emb, fpaths, flangs, flines, fcode, fcomments, fblanks, topn))
         } else {
-            println(report.to_json(t))
+            println(report.to_json(t, emb))
         }
     } else {
-        report.print_table_full(t, emb, th)
+        report.print_table_full(t, emb, th, sort, rev)
         if by_file {
             report.print_files_section(root, fpaths, flangs, flines, fcode, fcomments, fblanks, topn, th)
         }
