@@ -1,9 +1,10 @@
 // zcc/src/counter.zz — single-pass line counter.
 // Handles: blanks, line comments, block comments (nest-aware for Rust-style),
 // triple-quote doc strings (Python), Markdown fenced embeds.
+import std.fs
+import std.json
 import std.str
 import std.vec
-import std.json
 
 import languages
 
@@ -50,6 +51,25 @@ pub func count_content(content: str, lang: str) -> Counts {
 // (one interpreter-boundary crossing per file instead of per line) and
 // returns [lines, code, comments, blanks]. Markdown keeps its ZZ loop
 // (fence tracking + re-attribution live here, not in the primitive).
+
+// scan_file: fused read + binary-sniff + classify in one native call
+// (fs.scan_counts). Returns [lines, code, comments, blanks, binary]
+// with r[0] == -1 on unreadable files (sentinel: real counts are never
+// negative). Callers skip on r[0] < 0 or r[4] == 1, exactly like the
+// read/has_nul/.err paths. Rule derivation (nested/whole) mirrors
+// count_content_with, so both agree by construction. Embed-capable
+// langs (Markdown/Astro/Vue/Svelte/Mdx/Jupyter) must NOT use this for
+// counts: their ZZ loops re-attribute fence/island/notebook lines and
+// disagree with raw classify — workers branch on the language.
+
+pub func scan_file(path: str, lang: str, markers: [str], bstart: str, bend: str) -> [int] {
+    nested := lang == "Rust" || lang == "Swift" || lang == "Julia"
+    whole := lang == "Ruby" || lang == "Perl"
+    match fs.scan_counts(path, markers, bstart, bend, nested, whole) {
+        .ok(r) => r
+        .err(_) => [-1, 0, 0, 0, 0]
+    }
+}
 
 pub func count_content_with(content: str, lang: str, markers: [str], bstart: str, bend: str) -> Counts {
     if lang == "Markdown" {
@@ -340,6 +360,7 @@ func cell_source(cell: json) -> str {
         }
     }
 }
+
 pub func count_notebook(content: str) -> Counts {
     c := zero()
     match json.parse(content) {
@@ -445,24 +466,7 @@ pub func notebook_source(content: str) -> str {
 // Data table, not a chain — same convention as display_map above.
 
 func fence_tags() -> [[str]] {
-    [
-        ["bash", "BASH"],
-        ["sh", "BASH"],
-        ["shell", "BASH"],
-        ["rust", "Rust"],
-        ["python", "Python"],
-        ["py", "Python"],
-        ["toml", "TOML"],
-        ["lua", "Lua"],
-        ["js", "JavaScript"],
-        ["javascript", "JavaScript"],
-        ["ts", "TypeScript"],
-        ["typescript", "TypeScript"],
-        ["astro", "Astro"],
-        ["zz", "ZZ"],
-        ["yaml", "Yaml"],
-        ["yml", "Yaml"],
-    ]
+    [["bash", "BASH"], ["sh", "BASH"], ["shell", "BASH"], ["rust", "Rust"], ["python", "Python"], ["py", "Python"], ["toml", "TOML"], ["lua", "Lua"], ["js", "JavaScript"], ["javascript", "JavaScript"], ["ts", "TypeScript"], ["typescript", "TypeScript"], ["astro", "Astro"], ["zz", "ZZ"], ["yaml", "Yaml"], ["yml", "Yaml"]]
 }
 
 func fence_lang(tag: str) -> str {
