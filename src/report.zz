@@ -323,8 +323,8 @@ pub func totals(t: Table) -> [int] {
     [tf, tl, tc, tm, tb]
 }
 
-pub func print_table(t: Table, th: Theme) {
-    print_table_full(t, new_table(), th, "code", false)
+pub func print_table(t: Table, th: Theme, boxed: bool) {
+    print_table_full(t, new_table(), th, "code", false, boxed)
 }
 
 // Language cell text (colored display name, never padded — the table
@@ -359,9 +359,13 @@ func num_cells(vals: [int]) -> [str] {
 // block (inline nesting would break column alignment, so fence code
 // never renders in-tree).
 
-pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool) {
+pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool, boxed: bool) {
     t = sort_table(t, sort, rev)
     tot := totals(t)
+    if !boxed {
+        print_table_plain(t, emb, th, tot)
+        return
+    }
     bt := table.new(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]))
     bt = table.set_style(bt, th.style)
     for c in 1..6 {
@@ -373,8 +377,53 @@ pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool)
     bt = table.set_footer(bt, [maybe_bold(th, apply_color(th, th.total, "Total")), maybe_bold(th, apply_color(th, th.total, str(tot[0]))), maybe_bold(th, apply_color(th, th.total, str(tot[1]))), maybe_bold(th, apply_color(th, th.total, str(tot[2]))), maybe_bold(th, apply_color(th, th.total, str(tot[3]))), maybe_bold(th, apply_color(th, th.total, str(tot[4])))])
     println(table.render(bt))
     if len(emb.langs) > 0 {
-        print_emb_section(emb, th)
+        print_emb_section(emb, th, false)
     }
+}
+
+// Plain (unboxed) full table: the classic padded layout, default
+// output. Boxed rendering lives in print_table_full above.
+
+func print_table_plain(t: Table, emb: Table, th: Theme, tot: [int]) {
+    bar := "────────────────────────────────────────────────────────────────"
+    println(bar)
+    h1 := pad_r("Language", 16)
+    h2 := pad_l("Files", 8)
+    h3 := pad_l("Lines", 10)
+    h4 := pad_l("Code", 10)
+    h5 := pad_l("Comments", 10)
+    h6 := pad_l("Blanks", 10)
+    println(maybe_bold(th, apply_color(th, th.header, "{h1}{h2}{h3}{h4}{h5}{h6}")))
+    println(bar)
+    for i in 0..len(t.langs) {
+        lang := t.langs[i]
+        show := display_name(lang)
+        c1 := pad_r(show, 16)
+        c2 := pad_l(str(t.files[i]), 8)
+        c3 := pad_l(str(t.lines[i]), 10)
+        c4 := pad_l(str(t.code[i]), 10)
+        c5 := pad_l(str(t.comments[i]), 10)
+        c6 := pad_l(str(t.blanks[i]), 10)
+        line := "{c1}{c2}{c3}{c4}{c5}{c6}"
+        if is_plain_lang(th, lang) {
+            println(line)
+        } else {
+            println(lang_cell(th, lang, c1) + "{c2}{c3}{c4}{c5}{c6}")
+        }
+    }
+    println(bar)
+    if len(emb.langs) > 0 {
+        print_emb_section(emb, th, false)
+        println(bar)
+    }
+    tc1 := pad_r("Total", 16)
+    tc2 := pad_l(str(tot[0]), 8)
+    tc3 := pad_l(str(tot[1]), 10)
+    tc4 := pad_l(str(tot[2]), 10)
+    tc5 := pad_l(str(tot[3]), 10)
+    tc6 := pad_l(str(tot[4]), 10)
+    println(maybe_bold(th, apply_color(th, th.total, "{tc1}{tc2}{tc3}{tc4}{tc5}{tc6}")))
+    println(bar)
 }
 
 // Languages whose bodies extract embedded child rows (Markdown fences,
@@ -458,12 +507,16 @@ pub func display_path(p: str) -> str {
     "..." + p[len(p) - 41:len(p)]
 }
 
-pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int, th: Theme) {
+pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], topn: int, th: Theme, boxed: bool) {
     idx := top_by_lines(lines, topn)
     if len(idx) == 0 {
         return
     }
     shown := len(idx)
+    if !boxed {
+        print_files_plain(root, paths, langs, lines, code, comments, blanks, idx, shown, th)
+        return
+    }
     bt := table.new(head_cells(th, ["File", "Language", "Lines", "Code", "Comments", "Blanks"]))
     bt = table.set_style(bt, th.style)
     bt = table.set_title(bt, "Top {shown} files by lines")
@@ -481,7 +534,38 @@ pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int]
     println(table.render(bt))
 }
 
-pub func print_emb_section(emb: Table, th: Theme) {
+func print_files_plain(root: str, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], idx: [int], shown: int, th: Theme) {
+    println("")
+    println(" Top {shown} files by lines")
+    f0 := pad_r("File", 44)
+    f1 := pad_r("Language", 12)
+    f2 := pad_l("Lines", 10)
+    f3 := pad_l("Code", 10)
+    f4 := pad_l("Comments", 10)
+    f5 := pad_l("Blanks", 10)
+    println(maybe_bold(th, apply_color(th, th.header, "{f0}{f1}{f2}{f3}{f4}{f5}")))
+    for k in idx {
+        rel := paths[k]
+        prefix := root + "/"
+        if str.starts_with(rel, prefix) {
+            rel = rel[len(prefix):len(rel)]
+        }
+        c0 := pad_r(display_path(rel), 44)
+        c1 := pad_r(display_name(langs[k]), 12)
+        c2 := pad_l(str(lines[k]), 10)
+        c3 := pad_l(str(code[k]), 10)
+        c4 := pad_l(str(comments[k]), 10)
+        c5 := pad_l(str(blanks[k]), 10)
+        line := "{c0}{c1}{c2}{c3}{c4}{c5}"
+        if is_plain_lang(th, langs[k]) {
+            println(line)
+        } else {
+            println(c0 + lang_cell(th, langs[k], c1) + "{c2}{c3}{c4}{c5}")
+        }
+    }
+}
+
+pub func print_emb_section(emb: Table, th: Theme, boxed: bool) {
     if len(emb.langs) == 0 {
         return
     }
@@ -491,6 +575,10 @@ pub func print_emb_section(emb: Table, th: Theme) {
         t = add_row(t, emb.langs[i], emb.files[i], emb.lines[i], emb.code[i], emb.comments[i], emb.blanks[i])
     }
     t = sort_table(t, "code", false)
+    if !boxed {
+        print_emb_plain(t, th)
+        return
+    }
     bt := table.new(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]))
     bt = table.set_style(bt, th.style)
     bt = table.set_title(bt, "Embedded code")
@@ -515,6 +603,38 @@ pub func print_emb_section(emb: Table, th: Theme) {
     tot := totals(t)
     bt = table.set_footer(bt, [maybe_bold(th, apply_color(th, th.total, "Total")), str(tot[0]), str(tot[1]), str(tot[2]), str(tot[3]), str(tot[4])])
     println(table.render(bt))
+}
+
+func print_emb_plain(t: Table, th: Theme) {
+    println(maybe_bold(th, apply_color(th, th.header, "Embedded code")))
+    for i in 0..len(t.langs) {
+        lang := emb_base_lang(t.langs[i])
+        c1 := pad_r(" " + display_name(lang), 16)
+        c2 := pad_l(str(t.files[i]), 8)
+        c3 := pad_l(str(t.lines[i]), 10)
+        c4 := pad_l(str(t.code[i]), 10)
+        c5 := pad_l(str(t.comments[i]), 10)
+        c6 := pad_l(str(t.blanks[i]), 10)
+        line := "{c1}{c2}{c3}{c4}{c5}{c6}"
+        spec := theme_lang_color(th, lang)
+        if spec == "" {
+            spec = th.language
+        }
+        if th.color {
+            println(colors.dim(maybe_bold(th, apply_color(th, spec, c1))) + "{c2}{c3}{c4}{c5}{c6}")
+        } else {
+            println(line)
+        }
+    }
+    tot := totals(t)
+    // "└" is 3 bytes / 1 column: over-pad by 2 so the row spans 16 columns.
+    c1 := pad_r(" └ (Total)", 18)
+    c2 := pad_l(str(tot[0]), 8)
+    c3 := pad_l(str(tot[1]), 10)
+    c4 := pad_l(str(tot[2]), 10)
+    c5 := pad_l(str(tot[3]), 10)
+    c6 := pad_l(str(tot[4]), 10)
+    println("{c1}{c2}{c3}{c4}{c5}{c6}")
 }
 
 // JSON export (--output json). Manual build for full control.
