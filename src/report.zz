@@ -240,6 +240,12 @@ pub func display_name(lang: str) -> str {
     if lang == "Sql" {
         return "SQL"
     }
+    if lang == "Scss" {
+        return "SCSS"
+    }
+    if lang == "Protobuf" {
+        return "Protocol Buffers"
+    }
     if lang == "CSharp" {
         return "C#"
     }

@@ -205,6 +205,9 @@ pub func detect_lang(path: str) -> str {
     if ext == "css" {
         return "Css"
     }
+    if ext == "scss" {
+        return "Scss"
+    }
     if ext == "xml" {
         return "Xml"
     }
@@ -228,6 +231,24 @@ pub func detect_lang(path: str) -> str {
     }
     if ext == "yaml" || ext == "yml" {
         return "Yaml"
+    }
+    if ext == "graphql" || ext == "gql" {
+        return "GraphQL"
+    }
+    if ext == "tf" || ext == "tfvars" || ext == "hcl" {
+        return "Terraform"
+    }
+    if ext == "proto" {
+        return "Protobuf"
+    }
+    if ext == "prisma" {
+        return "Prisma"
+    }
+    if ext == "less" {
+        return "Less"
+    }
+    if ext == "styl" {
+        return "Stylus"
     }
     if ext == "md" || ext == "markdown" {
         return "Markdown"
@@ -314,10 +335,10 @@ pub func line_markers(lang: str) -> [str] {
     if lang == "Rust" || lang == "Go" || lang == "C" || lang == "CHeader" || lang == "Cpp" || lang == "CppHeader" || lang == "CSharp" || lang == "Java" || lang == "Kotlin" || lang == "Swift" || lang == "Dart" || lang == "Scala" || lang == "Zig" {
         return ["//"]
     }
-    if lang == "JavaScript" || lang == "TypeScript" || lang == "Jsx" || lang == "Tsx" || lang == "Qml" || lang == "Cuda" || lang == "Cython" {
+    if lang == "JavaScript" || lang == "TypeScript" || lang == "Jsx" || lang == "Tsx" || lang == "Qml" || lang == "Cuda" || lang == "Cython" || lang == "Scss" || lang == "Less" || lang == "Stylus" || lang == "Prisma" || lang == "Protobuf" {
         return ["//"]
     }
-    if lang == "Python" || lang == "Bash" || lang == "Zsh" || lang == "Fish" || lang == "Nushell" || lang == "CShell" || lang == "Ruby" || lang == "Perl" || lang == "Perl6" || lang == "R" || lang == "Julia" || lang == "Nim" || lang == "Yaml" || lang == "Toml" || lang == "Makefile" || lang == "CMake" || lang == "Dockerfile" || lang == "Elixir" || lang == "Jq" || lang == "CoffeeScript" || lang == "D" || lang == "D2" {
+    if lang == "Python" || lang == "Bash" || lang == "Zsh" || lang == "Fish" || lang == "Nushell" || lang == "CShell" || lang == "Ruby" || lang == "Perl" || lang == "Perl6" || lang == "R" || lang == "Julia" || lang == "Nim" || lang == "Yaml" || lang == "Toml" || lang == "Makefile" || lang == "CMake" || lang == "Dockerfile" || lang == "Elixir" || lang == "Jq" || lang == "CoffeeScript" || lang == "D" || lang == "D2" || lang == "Terraform" || lang == "GraphQL" {
         return ["#"]
     }
     if lang == "Php" {
@@ -387,7 +408,7 @@ pub func block_pair(lang: str) -> [str] {
     if lang == "Nim" {
         return ["#[", "]#"]
     }
-    if lang == "Python" || lang == "Cython" || lang == "GdScript" {
+    if lang == "Python" || lang == "Cython" || lang == "GdScript" || lang == "GraphQL" {
         return ["\"\"\"", "\"\"\""]
     }
     if lang == "Ruby" {

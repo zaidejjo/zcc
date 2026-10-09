@@ -1046,3 +1046,31 @@ func test_blame_parse() {
     assert_eq(names[1], "Bot")
     assert_eq(len(blame.parse_blame_authors("")), 0)
 }
+
+@test
+func test_new_langs() {
+    scss := ".a {\n  // tint\n  color: red;\n}\n"
+    c := counter.count_content(scss, "Scss")
+    assert_eq(c.lines, 4)
+    assert_eq(c.code, 3)
+    assert_eq(c.comments, 1)
+    tf := "# main\nresource \"x\" \"y\" {}\n"
+    c = counter.count_content(tf, "Terraform")
+    assert_eq(c.lines, 2)
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 1)
+    gql := "# schema\ntype Q {\n  f: Int\n}\n\"\"\"Doc\"\"\"\n"
+    c = counter.count_content(gql, "GraphQL")
+    assert_eq(c.lines, 5)
+    assert_eq(c.code, 3)
+    assert_eq(c.comments, 2)
+    proto := "// gen\nsyntax = \"proto3\";\n"
+    c = counter.count_content(proto, "Protobuf")
+    assert_eq(c.code, 1)
+    assert_eq(c.comments, 1)
+    prisma := "model U {\n  id Int\n}\n"
+    c = counter.count_content(prisma, "Prisma")
+    assert_eq(c.code, 3)
+    assert_eq(report.display_name("Scss"), "SCSS")
+    assert_eq(report.display_name("GraphQL"), "GraphQL")
+}
