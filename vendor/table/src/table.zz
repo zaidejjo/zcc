@@ -1,0 +1,388 @@
+// table — beautiful rounded CLI tables, pure ZZ, zero dependencies.
+//
+// Layout: table.zz (this entry, thin wrappers), model.zz (Table +
+// builders), engine.zz (widths, lines, renderers), text.zz (measuring),
+// theme.zz (names, glyphs). Import only this file: `import table`.
+//
+// Default style is rounded Unicode (no ASCII `+--+`):
+//
+//   ╭────────┬─────╮
+//   │ NAME   │ AGE │
+//   ├────────┼─────┤
+//   │ Alice  │ 25  │
+//   │ Bob    │ 30  │
+//   ╰────────┴─────╯
+//
+// Quick start:
+//
+//   import table
+//
+//   t := table.new(["NAME", "AGE"])
+//   t = table.add_row(t, ["Alice", "25"])
+//   t = table.add_row(t, ["Bob", "30"])
+//   println(table.render(t))
+//
+// One-liner:
+//
+//   println(table.simple(["A", "B"], [["1", "2"]]))
+//
+// Colors: pass `std.colors` output straight in — widths stay aligned
+// because measuring strips ANSI (`\e[...m`) before counting:
+//
+//   import std.colors
+//   t := table.new([colors.bold("NAME"), colors.bold("AGE")])
+//   t = table.add_row(t, ["Alice", colors.green("25")])
+//   table.print(t)
+//
+// Styles: "rounded" (default), "sharp", "heavy", "double",
+// "markdown", "minimal", "ascii". Unknown names fall back to rounded.
+// Aligns: "left" (default), "center", "right" — per column.
+//
+// Performance: one width pass (O(cells)) plus one output pass, no
+// per-row accumulation structures. Truncation caps resolve to a
+// single hoisted on/off flag per render, so the common uncapped path
+// adds one integer compare per cell. No regex, no I/O, no globals.
+
+import engine
+import model
+import text
+import theme
+
+/// Create a table with header cells. Style defaults to "rounded".
+
+pub func new(headers: [str]) -> model.Table {
+    model.new(headers)
+}
+
+/// Create a table from headers plus all rows at once.
+
+pub func from_rows(headers: [str], rows: [[str]]) -> model.Table {
+    model.from_rows(headers, rows)
+}
+
+/// One-liner: build and render immediately.
+
+pub func simple(headers: [str], rows: [[str]]) -> str {
+    engine.simple(headers, rows)
+}
+
+/// Append one row. Short rows are padded with ""; long rows are kept
+/// whole (extra cells render). Never fails.
+
+pub func add_row(t: model.Table, row: [str]) -> model.Table {
+    model.add_row(t, row)
+}
+
+/// Append many rows at once (cheaper than looping in user code).
+
+pub func add_rows(t: model.Table, rows: [[str]]) -> model.Table {
+    model.add_rows(t, rows)
+}
+
+/// Body row count. Handy for paging UIs (`set_max_rows`/`set_row_offset`).
+
+pub func row_count(t: model.Table) -> int {
+    model.row_count(t)
+}
+
+/// Rendered column count: widest of headers, rows, and footer.
+
+pub func col_count(t: model.Table) -> int {
+    model.col_count(t)
+}
+
+/// Header cells (a copy — mutating it never touches the table).
+
+pub func headers(t: model.Table) -> [str] {
+    model.headers(t)
+}
+
+/// One body row (a copy). Out-of-range indices yield `[]`, never a panic.
+
+pub func row(t: model.Table, i: int) -> [str] {
+    model.row(t, i)
+}
+
+/// Build from any row type via a mapper closure. This is the sqlz
+/// bridge: query structs (or unannoted `row{c0, …}` dicts) become
+/// string cells through your mapper. Rows-first so `|>` pipelines
+/// read naturally:
+///
+///   users |> table.from(["ID", "NAME"], |u: User| [str(u.id), u.name])
+///         |> table.render()
+///
+///   rows |> table.from(["ID", "NAME"], |r| [str(r.c0), str(r.c1)])
+///        |> table.render()
+
+pub func from<T>(rows: [T], headers: [str], f: func(T) -> [str]) -> model.Table {
+    model.from(rows, headers, f)
+}
+
+/// One string column from any row type. Combine with `from_cols` to
+/// assemble tables column by column, or use it standalone:
+///
+///   ids := table.column(users, |u: User| str(u.id))
+
+pub func column<T>(rows: [T], f: func(T) -> str) -> [str] {
+    model.column(rows, f)
+}
+
+/// Build by transposing columns into rows. Short columns pad with "";
+/// extra headers render blank over missing cells. Never fails.
+
+pub func from_cols(headers: [str], cols: [[str]]) -> model.Table {
+    model.from_cols(headers, cols)
+}
+
+/// Insert a 1-based index column at the left. Numbers are global, so
+/// pages (`set_row_offset`) stay stable. The index column is numeric
+/// (auto right-aligned); pass `""` for a blank header. The footer
+/// gains a blank cell to stay aligned.
+
+pub func with_row_numbers(t: model.Table, header: str) -> model.Table {
+    model.with_row_numbers(t, header)
+}
+
+/// Transpose rows and columns: headers become the first row, the old
+/// first column becomes the new headers. Display settings carry over;
+/// per-column alignment resets to auto and the footer is dropped.
+
+pub func transpose(t: model.Table) -> model.Table {
+    model.transpose(t)
+}
+
+/// Drop one column from headers, every row, footer, and spans.
+/// Out-of-range indices are ignored. Repeated hides compose: indices
+/// always refer to the current table.
+
+pub func hide_col(t: model.Table, col: int) -> model.Table {
+    model.hide_col(t, col)
+}
+
+/// Sum of numeric-looking body cells in one column. Non-numeric
+/// cells are skipped; empty or bad columns yield `0.0`.
+
+pub func col_sum(t: model.Table, col: int) -> float {
+    model.col_sum(t, col)
+}
+
+/// Mean of numeric-looking body cells in one column. No numeric
+/// cells (or a bad column) yields `0.0` — never a divide-by-zero.
+
+pub func col_avg(t: model.Table, col: int) -> float {
+    model.col_avg(t, col)
+}
+
+/// Count of numeric-looking body cells in one column. Bad columns
+/// yield `0`.
+
+pub func col_num_count(t: model.Table, col: int) -> int {
+    model.col_num_count(t, col)
+}
+
+/// Full data as CSV text: headers, every body row, then the footer.
+/// Always complete (paging and truncation never apply); the `… +N more`
+/// note is excluded. Cells export sanitized and untruncated.
+
+pub func to_csv(t: model.Table) -> str {
+    model.to_csv(t)
+}
+
+/// Full data as a JSON array of objects keyed by headers: body rows
+/// only (the footer is a display total). Short rows fill `""`;
+/// cells past the headers are dropped. Sanitized, untruncated.
+
+pub func to_json(t: model.Table) -> str {
+    model.to_json(t)
+}
+
+/// Headers plus every body row, as plain rows. Round-trips with
+/// `from_rows`; the footer stays out (it belongs to display).
+
+pub func to_rows(t: model.Table) -> [[str]] {
+    model.to_rows(t)
+}
+
+/// Shrink column caps until the framed table fits `total` terminal
+/// columns (sides included). Widest column first, floor 3, existing
+/// caps only lowered. Best effort when even the floor doesn't fit.
+
+pub func fit_width(t: model.Table, total: int) -> model.Table {
+    engine.fit_width(t, total)
+}
+
+/// Build from a JSON document: array-of-arrays (cells in order) or
+/// array-of-objects (columns picked in `headers` order, missing keys
+/// render blank). Scalars convert naturally (numbers keep their text,
+/// booleans print true/false, null and nesting render blank). Total:
+/// invalid JSON or a non-array document yields a headers-only table.
+///
+///   table.from_json(["ID", "NAME"], "[{\"id\": 1, \"name\": \"a\"}]")
+
+pub func from_json(headers: [str], text: str) -> model.Table {
+    model.from_json(headers, text)
+}
+
+/// Build from CSV text via `std.csv` (RFC4180: quoted commas, doubled
+/// quotes, custom delimiters). First row is data, not headers — pass
+/// headers explicitly, or `[]` to take them from the first row.
+/// Total: invalid CSV yields a headers-only table, never an error.
+///
+///   table.from_csv(["ID", "NAME"], "1,a\n2,b\n")
+
+pub func from_csv(headers: [str], text: str) -> model.Table {
+    model.from_csv(headers, text)
+}
+
+/// Build from delimited text (`";"`, tabs, pipes) via
+/// `csv.parse_delim`. Same header rules as `from_csv`.
+
+pub func from_csv_delim(headers: [str], text: str, delim: str) -> model.Table {
+    model.from_csv_delim(headers, text, delim)
+}
+
+/// Build from an array of dicts. Values convert with `str()`; every
+/// dict must contain every header (a missing key is a runtime error,
+/// like a short sqlz row). Header order sets column order:
+///
+///   table.from_dicts(["id", "name"], [{"id": 1, "name": "a"}])
+
+pub func from_dicts<T>(headers: [str], rows: [{str: T}]) -> model.Table {
+    model.from_dicts(headers, rows)
+}
+
+/// Switch border style. Unknown names fall back to "rounded".
+/// See `styles()` for the full list.
+
+pub func set_style(t: model.Table, name: str) -> model.Table {
+    model.set_style(t, name)
+}
+
+/// Set one column's alignment: "left" | "center" | "right".
+/// Out-of-range columns and bad modes are ignored (no panic).
+
+pub func set_align(t: model.Table, col: int, mode: str) -> model.Table {
+    model.set_align(t, col, mode)
+}
+
+/// Set every column's alignment at once. Sticky: columns added later
+/// inherit this mode.
+
+pub func set_align_all(t: model.Table, mode: str) -> model.Table {
+    model.set_align_all(t, mode)
+}
+
+/// Set header alignment independently from body cells: "left" |
+/// "center" | "right" | "auto" (default: follow each column).
+
+pub func set_header_align(t: model.Table, mode: str) -> model.Table {
+    model.set_header_align(t, mode)
+}
+
+/// Cell padding per side (spaces). Clamped to 0..8.
+
+pub func set_padding(t: model.Table, n: int) -> model.Table {
+    model.set_padding(t, n)
+}
+
+/// Centered title printed above the table. Empty hides it.
+
+pub func set_title(t: model.Table, title: str) -> model.Table {
+    model.set_title(t, title)
+}
+
+/// Caption line printed below the table (sources, units, footnotes).
+/// Sanitized like cells, so embedded newlines cannot break the grid.
+/// Empty hides it.
+
+pub func set_caption(t: model.Table, caption: str) -> model.Table {
+    model.set_caption(t, caption)
+}
+
+/// Footer row (e.g. totals). Rendered after a separator, before the
+/// bottom border. Empty hides it.
+
+pub func set_footer(t: model.Table, footer: [str]) -> model.Table {
+    model.set_footer(t, footer)
+}
+
+/// Cap every column's visible width. Cells longer than `n` render
+/// truncated with a trailing `…`. `0` (default) means unlimited.
+/// Negative values are treated as `0`.
+
+pub func set_max_width(t: model.Table, n: int) -> model.Table {
+    model.set_max_width(t, n)
+}
+
+/// Cap the rendered body rows. Overflow collapses into a trailing
+/// `… +N more` note row. `0` (default) means unlimited. Negative
+/// values are treated as `0`.
+
+pub func set_max_rows(t: model.Table, n: int) -> model.Table {
+    model.set_max_rows(t, n)
+}
+
+/// Skip the first `n` body rows (paging partner for `set_max_rows`).
+/// The trailing note counts all hidden rows, above and below.
+/// Negative values are treated as `0`; past-the-end renders headers
+/// (plus note and footer) with an empty body.
+
+pub func set_row_offset(t: model.Table, n: int) -> model.Table {
+    model.set_row_offset(t, n)
+}
+
+/// Cap one column's visible width (overrides `set_max_width` for that
+/// column). Out-of-range columns are ignored. `0` clears the cap.
+
+pub func set_col_max_width(t: model.Table, col: int, n: int) -> model.Table {
+    model.set_col_max_width(t, col, n)
+}
+
+/// Draw a separator between every data row (default: only under the
+/// header and above the footer).
+
+pub func set_row_lines(t: model.Table, on: bool) -> model.Table {
+    model.set_row_lines(t, on)
+}
+
+/// Show or hide the outer frame (top/bottom rules and side borders).
+/// Inner column separators stay. Markdown drops its edge pipes
+/// (still valid markdown); minimal has no frame, so this is a no-op
+/// there. Default: shown.
+
+pub func set_outer_border(t: model.Table, on: bool) -> model.Table {
+    model.set_outer_border(t, on)
+}
+
+/// Show or hide the separator between header and body. Hiding it
+/// merges header and rows into one unruled block. Default: shown.
+
+pub func set_header_line(t: model.Table, on: bool) -> model.Table {
+    model.set_header_line(t, on)
+}
+
+/// Render to a string (trailing newline included, no printing).
+
+pub func render(t: model.Table) -> str {
+    engine.render(t)
+}
+
+/// Print the table to stdout.
+
+pub func print(t: model.Table) {
+    engine.print(t)
+}
+
+/// All style names accepted by `set_style`.
+
+pub func styles() -> [str] {
+    theme.styles()
+}
+
+/// Visible width of a cell: ANSI `\e[...m` sequences (from `std.colors`)
+/// contribute 0, every other char contributes 1. Shared with the
+/// renderer so your own layout matches table columns.
+
+pub func visible_len(s: str) -> int {
+    text.visible_len(s)
+}

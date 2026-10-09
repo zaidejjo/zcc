@@ -1,0 +1,66 @@
+// theme.zz — border styles, alignments, and glyph sets for tables.
+//
+// Pure lookup tables: no table types here on purpose, so the package
+// entry can share this leaf without import cycles.
+
+pub func style_name(s: str) -> str {
+    if s == "rounded" {
+        return "rounded"
+    }
+    if s == "sharp" {
+        return "sharp"
+    }
+    if s == "heavy" {
+        return "heavy"
+    }
+    if s == "double" {
+        return "double"
+    }
+    if s == "markdown" {
+        return "markdown"
+    }
+    if s == "minimal" {
+        return "minimal"
+    }
+    if s == "ascii" {
+        return "ascii"
+    }
+    "rounded"
+}
+
+pub func align_name(m: str) -> str {
+    if m == "right" {
+        return "right"
+    }
+    if m == "center" {
+        return "center"
+    }
+    if m == "auto" {
+        return "auto"
+    }
+    "left"
+}
+
+// Border glyphs per style: [tl, tr, bl, br, h, v, lt, rt, tt, bt, mj]
+
+pub func glyphs(st: str) -> [str] {
+    if st == "sharp" {
+        return ["┌", "┐", "└", "┘", "─", "│", "├", "┤", "┬", "┴", "┼"]
+    }
+    if st == "heavy" {
+        return ["┏", "┓", "┗", "┛", "━", "┃", "┣", "┫", "┳", "┻", "╋"]
+    }
+    if st == "double" {
+        return ["╔", "╗", "╚", "╝", "═", "║", "╠", "╣", "╦", "╩", "╬"]
+    }
+    if st == "ascii" {
+        return ["+", "+", "+", "+", "-", "|", "+", "+", "+", "+", "+"]
+    }
+    ["╭", "╮", "╰", "╯", "─", "│", "├", "┤", "┬", "┴", "┼"]
+}
+
+/// All style names accepted by `set_style`.
+
+pub func styles() -> [str] {
+    ["rounded", "sharp", "heavy", "double", "markdown", "minimal", "ascii"]
+}
