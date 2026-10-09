@@ -441,6 +441,39 @@ pub func notebook_source(content: str) -> str {
     }
 }
 
+// Fence-tag normalization: markdown tags to zcc language names.
+// Data table, not a chain — same convention as display_map above.
+
+func fence_tags() -> [[str]] {
+    [
+        ["bash", "BASH"],
+        ["sh", "BASH"],
+        ["shell", "BASH"],
+        ["rust", "Rust"],
+        ["python", "Python"],
+        ["py", "Python"],
+        ["toml", "TOML"],
+        ["lua", "Lua"],
+        ["js", "JavaScript"],
+        ["javascript", "JavaScript"],
+        ["ts", "TypeScript"],
+        ["typescript", "TypeScript"],
+        ["astro", "Astro"],
+        ["zz", "ZZ"],
+        ["yaml", "Yaml"],
+        ["yml", "Yaml"],
+    ]
+}
+
+func fence_lang(tag: str) -> str {
+    for pair in fence_tags() {
+        if pair[0] == tag {
+            return pair[1]
+        }
+    }
+    tag
+}
+
 // Extract fenced blocks: returns parallel arrays [lang, body].
 
 pub func markdown_fences(content: str) -> [str] {
@@ -462,37 +495,7 @@ pub func markdown_fences(content: str) -> [str] {
             } else {
                 tag := str.trim(str.split(t, "```")[1] ?? "")
                 // normalize fence tags to zcc language names
-                if tag == "bash" || tag == "sh" || tag == "shell" {
-                    tag = "BASH"
-                }
-                if tag == "rust" {
-                    tag = "Rust"
-                }
-                if tag == "python" || tag == "py" {
-                    tag = "Python"
-                }
-                if tag == "toml" {
-                    tag = "TOML"
-                }
-                if tag == "lua" {
-                    tag = "Lua"
-                }
-                if tag == "js" || tag == "javascript" {
-                    tag = "JavaScript"
-                }
-                if tag == "ts" || tag == "typescript" {
-                    tag = "TypeScript"
-                }
-                if tag == "astro" {
-                    tag = "Astro"
-                }
-                if tag == "zz" {
-                    tag = "ZZ"
-                }
-                if tag == "yaml" || tag == "yml" {
-                    tag = "Yaml"
-                }
-                cur_lang = tag
+                cur_lang = fence_lang(tag)
                 in_fence = true
             }
             continue

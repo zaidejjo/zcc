@@ -181,6 +181,13 @@
     "block_start": ["/*"],
     "block_end": ["*/"]
   },
+  "GraphQL": {
+    "extensions": ["graphql", "gql"],
+    "files": [],
+    "line": ["#"],
+    "block_start": ["\"\"\""],
+    "block_end": ["\"\"\""]
+  },
   "Html": {
     "extensions": ["html", "htm"],
     "files": [],
@@ -239,6 +246,13 @@
   },
   "Kotlin": {
     "extensions": ["kt", "kts"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Less": {
+    "extensions": ["less"],
     "files": [],
     "line": ["//"],
     "block_start": ["/*"],
@@ -349,6 +363,20 @@
     "block_start": ["<#"],
     "block_end": ["#>"]
   },
+  "Prisma": {
+    "extensions": ["prisma"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Protobuf": {
+    "extensions": ["proto"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
   "Python": {
     "extensions": ["py", "pyw"],
     "files": [],
@@ -398,10 +426,24 @@
     "block_start": ["/*"],
     "block_end": ["*/"]
   },
+  "Scss": {
+    "extensions": ["scss"],
+    "files": [],
+    "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
   "Sql": {
     "extensions": ["sql"],
     "files": [],
     "line": ["--"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Stylus": {
+    "extensions": ["styl"],
+    "files": [],
+    "line": ["//"],
     "block_start": ["/*"],
     "block_end": ["*/"]
   },
@@ -423,6 +465,13 @@
     "extensions": ["swift"],
     "files": [],
     "line": ["//"],
+    "block_start": ["/*"],
+    "block_end": ["*/"]
+  },
+  "Terraform": {
+    "extensions": ["tf", "tfvars", "hcl"],
+    "files": [],
+    "line": ["#"],
     "block_start": ["/*"],
     "block_end": ["*/"]
   },
