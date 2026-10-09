@@ -47,6 +47,7 @@ func print_help() {
     println("    --only LANG         count only this language (e.g. Rust)")
     println("    --sort KEY          sort table by code|lines|files|comments|blanks (default code, desc; prefix - for asc)")
     println("    --reverse           ascending sort order")
+    println("    --style NAME        table style: rounded|sharp|heavy|double|markdown|minimal|ascii (default rounded)")
     println("    --no-generated      hide Generated rows (totals recompute)")
     println("    --force             with init: overwrite existing config")
     println("    --by-file           list top files by lines after the table")
@@ -85,8 +86,10 @@ func main(cli_args: [str]) {
     by_file := false
     topn := 20
     top_next := false
+    style_next := false
     sort := "code"
     rev := false
+    style := "rounded"
     no_generated := false
     only := ""
     show_help := false
@@ -173,6 +176,22 @@ func main(cli_args: [str]) {
         }
         if a == "--reverse" {
             rev = true
+            continue
+        }
+        if str.starts_with(a, "--style=") {
+            parts := str.split(a, "=")
+            if len(parts) > 1 {
+                style = parts[1]
+            }
+            continue
+        }
+        if a == "--style" {
+            style_next = true
+            continue
+        }
+        if style_next {
+            style = a
+            style_next = false
             continue
         }
         if a == "--no-generated" {
@@ -274,7 +293,7 @@ func main(cli_args: [str]) {
         println("zcc: path not found: {root}")
         return
     }
-    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn, sort, rev, no_generated)
+    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn, sort, rev, no_generated, style)
 }
 
 func run_single(path: str, only: str, out_json: bool) {
@@ -312,7 +331,7 @@ func run_single(path: str, only: str, out_json: bool) {
     }
 }
 
-func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int, sort: str, rev: bool, no_generated: bool) {
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int, sort: str, rev: bool, no_generated: bool, style: str) {
     pats := walker.load_patterns(root)
     // Worker budget shared by walk fan-out and count fan-out below.
     nworkers := sys.cpu_count()
@@ -325,6 +344,7 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     files := walker.walk_files_par(root, pats, use_ignore, include_hidden, nworkers)
     cfg := config.load_config()
     th := config.build_theme(cfg)
+    th = report.make_theme(th.color, th.header, th.language, th.total, th.names, th.specs, style)
     table := config.lang_table_with(cfg)
     customs := config.custom_names(cfg)
     em := languages.build_ext_map(table)
