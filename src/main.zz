@@ -10,6 +10,7 @@ import std.sys
 import std.task
 import std.vec
 
+import blame
 import cache
 import config
 import counter
@@ -67,6 +68,7 @@ func print_help() {
     println("EXAMPLES:")
     println("    zcc init            write ~/.config/zcc/config.json")
     println("    zcc diff [BASE]     per-language added/removed vs BASE (default HEAD)")
+    println("    zcc blame [path]    per-author line share via git blame")
     println("    zcc .")
     println("    zcc src/ --only Rust")
     println("    zcc . --output json > counts.json")
@@ -240,6 +242,22 @@ func main(cli_args: [str]) {
             }
         }
         diff.run_diff(base)
+        return
+    }
+    // blame subcommand: `zcc blame [path]` (default .).
+    if target == "blame" {
+        broot := "."
+        for a in cli_args {
+            if a == "blame" || a == "--" {
+                continue
+            }
+            if str.starts_with(a, "--") {
+                continue
+            }
+            broot = a
+            break
+        }
+        blame.run_blame(broot)
         return
     }
     // resolve target
