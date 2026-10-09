@@ -325,6 +325,19 @@ pub func detect_lang(path: str) -> str {
     ""
 }
 
+// Membership test: the codebase resolves small option sets by linear
+// scan (n < 40, string compares are native). Prefer this over growing
+// `a || b || ...` chains — same semantics, one line per group.
+
+pub func is_one_of(s: str, opts: [str]) -> bool {
+    for o in opts {
+        if o == s {
+            return true
+        }
+    }
+    false
+}
+
 // ── Comment rules per language ───────────────────────────────────────────────
 // Returns line markers joined by \x01, block pair as [start, end].
 
@@ -332,13 +345,13 @@ pub func line_markers(lang: str) -> [str] {
     if lang == "ZZ" {
         return ["//", "#"]
     }
-    if lang == "Rust" || lang == "Go" || lang == "C" || lang == "CHeader" || lang == "Cpp" || lang == "CppHeader" || lang == "CSharp" || lang == "Java" || lang == "Kotlin" || lang == "Swift" || lang == "Dart" || lang == "Scala" || lang == "Zig" {
+    if is_one_of(lang, ["Rust", "Go", "C", "CHeader", "Cpp", "CppHeader", "CSharp", "Java", "Kotlin", "Swift", "Dart", "Scala", "Zig"]) {
         return ["//"]
     }
-    if lang == "JavaScript" || lang == "TypeScript" || lang == "Jsx" || lang == "Tsx" || lang == "Qml" || lang == "Cuda" || lang == "Cython" || lang == "Scss" || lang == "Less" || lang == "Stylus" || lang == "Prisma" || lang == "Protobuf" {
+    if is_one_of(lang, ["JavaScript", "TypeScript", "Jsx", "Tsx", "Qml", "Cuda", "Cython", "Scss", "Less", "Stylus", "Prisma", "Protobuf"]) {
         return ["//"]
     }
-    if lang == "Python" || lang == "Bash" || lang == "Zsh" || lang == "Fish" || lang == "Nushell" || lang == "CShell" || lang == "Ruby" || lang == "Perl" || lang == "Perl6" || lang == "R" || lang == "Julia" || lang == "Nim" || lang == "Yaml" || lang == "Toml" || lang == "Makefile" || lang == "CMake" || lang == "Dockerfile" || lang == "Elixir" || lang == "Jq" || lang == "CoffeeScript" || lang == "D" || lang == "D2" || lang == "Terraform" || lang == "GraphQL" {
+    if is_one_of(lang, ["Python", "Bash", "Zsh", "Fish", "Nushell", "CShell", "Ruby", "Perl", "Perl6", "R", "Julia", "Nim", "Yaml", "Toml", "Makefile", "CMake", "Dockerfile", "Elixir", "Jq", "CoffeeScript", "D", "D2", "Terraform", "GraphQL"]) {
         return ["#"]
     }
     if lang == "Php" {
@@ -359,7 +372,7 @@ pub func line_markers(lang: str) -> [str] {
     if lang == "VimScript" {
         return ["\""]
     }
-    if lang == "VB6" || lang == "VBScript" {
+    if is_one_of(lang, ["VB6", "VBScript"]) {
         return ["'"]
     }
     if lang == "LLVM" {
@@ -374,7 +387,7 @@ pub func line_markers(lang: str) -> [str] {
     if lang == "GdScript" {
         return ["#"]
     }
-    if lang == "GdShader" || lang == "ObjectiveC" || lang == "ObjectiveCpp" || lang == "Pascal" || lang == "OCaml" {
+    if is_one_of(lang, ["GdShader", "ObjectiveC", "ObjectiveCpp", "Pascal", "OCaml"]) {
         return ["//"]
     }
     if lang == "WebAssembly" {
@@ -387,7 +400,7 @@ pub func line_markers(lang: str) -> [str] {
 }
 
 pub func block_pair(lang: str) -> [str] {
-    if lang == "Html" || lang == "Xml" || lang == "Svg" || lang == "Vue" || lang == "Svelte" || lang == "Astro" {
+    if is_one_of(lang, ["Html", "Xml", "Svg", "Vue", "Svelte", "Astro"]) {
         return ["<!--", "-->"]
     }
     if lang == "Css" {
@@ -408,7 +421,7 @@ pub func block_pair(lang: str) -> [str] {
     if lang == "Nim" {
         return ["#[", "]#"]
     }
-    if lang == "Python" || lang == "Cython" || lang == "GdScript" || lang == "GraphQL" {
+    if is_one_of(lang, ["Python", "Cython", "GdScript", "GraphQL"]) {
         return ["\"\"\"", "\"\"\""]
     }
     if lang == "Ruby" {
@@ -438,10 +451,10 @@ pub func block_pair(lang: str) -> [str] {
     if lang == "WebAssembly" {
         return ["(;", ";)"]
     }
-    if lang == "Text" || lang == "Json" || lang == "Markdown" {
+    if is_one_of(lang, ["Text", "Json", "Markdown"]) {
         return []
     }
-    if lang == "Bash" || lang == "Zsh" || lang == "Fish" || lang == "Nushell" || lang == "CShell" || lang == "Makefile" || lang == "Dockerfile" || lang == "Yaml" || lang == "Toml" || lang == "Elixir" || lang == "Erlang" || lang == "Jq" || lang == "R" || lang == "VimScript" || lang == "VB6" || lang == "VBScript" || lang == "LLVM" || lang == "Zig" {
+    if is_one_of(lang, ["Bash", "Zsh", "Fish", "Nushell", "CShell", "Makefile", "Dockerfile", "Yaml", "Toml", "Elixir", "Erlang", "Jq", "R", "VimScript", "VB6", "VBScript", "LLVM", "Zig"]) {
         return []
     }
     // C-family default.

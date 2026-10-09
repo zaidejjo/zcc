@@ -216,70 +216,43 @@ pub func add_row(t: Table, lang: str, files: int, lines: int, code: int, comment
 // while the table shows the conventional acronym casing (CSS, JSON).
 
 pub func display_name(lang: str) -> str {
-    if lang == "Css" {
-        return "CSS"
-    }
-    if lang == "Svg" {
-        return "SVG"
-    }
-    if lang == "Json" {
-        return "JSON"
-    }
-    if lang == "Toml" {
-        return "TOML"
-    }
-    if lang == "Html" {
-        return "HTML"
-    }
-    if lang == "Xml" {
-        return "XML"
-    }
-    if lang == "Yaml" {
-        return "YAML"
-    }
-    if lang == "Sql" {
-        return "SQL"
-    }
-    if lang == "Scss" {
-        return "SCSS"
-    }
-    if lang == "Protobuf" {
-        return "Protocol Buffers"
-    }
-    if lang == "CSharp" {
-        return "C#"
-    }
-    if lang == "Cpp" {
-        return "C++"
-    }
-    if lang == "CppHeader" {
-        return "C++ Header"
-    }
-    if lang == "CHeader" {
-        return "C Header"
-    }
-    if lang == "FSharp" {
-        return "F#"
-    }
-    if lang == "Jsx" {
-        return "JSX"
-    }
-    if lang == "Tsx" {
-        return "TSX"
-    }
-    if lang == "Mdx" {
-        return "MDX"
-    }
-    if lang == "VimScript" {
-        return "Vim Script"
-    }
-    if lang == "ObjectiveC" {
-        return "Objective-C"
-    }
-    if lang == "ObjectiveCpp" {
-        return "Objective-C++"
+    for pair in display_map() {
+        if pair[0] == lang {
+            return pair[1]
+        }
     }
     lang
+}
+
+// Display names: canonical keys stay machine-readable (Css, Json)
+// while the table shows conventional spellings (CSS, C#, ...).
+// Data-driven pair list, same linear-scan convention as
+// languages.is_one_of.
+
+func display_map() -> [[str]] {
+    [
+        ["Css", "CSS"],
+        ["Svg", "SVG"],
+        ["Json", "JSON"],
+        ["Toml", "TOML"],
+        ["Html", "HTML"],
+        ["Xml", "XML"],
+        ["Yaml", "YAML"],
+        ["Sql", "SQL"],
+        ["CSharp", "C#"],
+        ["Cpp", "C++"],
+        ["CppHeader", "C++ Header"],
+        ["CHeader", "C Header"],
+        ["FSharp", "F#"],
+        ["Jsx", "JSX"],
+        ["Tsx", "TSX"],
+        ["Mdx", "MDX"],
+        ["VimScript", "Vim Script"],
+        ["ObjectiveC", "Objective-C"],
+        ["ObjectiveCpp", "Objective-C++"],
+        ["Scss", "SCSS"],
+        ["Protobuf", "Protocol Buffers"],
+    ]
 }
 
 // Sort by any column, descending unless rev. Bubble, n small.

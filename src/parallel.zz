@@ -179,7 +179,7 @@ pub func island_enc(text: str, front: bool) -> str {
             body = blist[i]
         }
         ec := counter.count_content(body, tag)
-        if tag == "Yaml" || tag == "Css" || tag == "TypeScript" || tag == "JavaScript" {
+        if languages.is_one_of(tag, ["Yaml", "Css", "TypeScript", "JavaScript"]) {
             hit := -1
             for q in 0..len(agg_lang) {
                 if agg_lang[q] == tag {
@@ -251,11 +251,8 @@ pub func fence_enc(text: str) -> str {
             body = blist[i]
         }
         disp := tag
-        if disp == "BASH" {
-            disp = "BASH"
-        }
         ec := counter.count_content(body, disp)
-        if disp == "BASH" || disp == "Rust" || disp == "Python" || disp == "TOML" || disp == "Lua" || disp == "JavaScript" || disp == "TypeScript" || disp == "Astro" || disp == "ZZ" || disp == "Yaml" {
+        if languages.is_one_of(disp, ["BASH", "Rust", "Python", "TOML", "Lua", "JavaScript", "TypeScript", "Astro", "ZZ", "Yaml"]) {
             hit := -1
             for q in 0..len(agg_lang) {
                 if agg_lang[q] == disp {
