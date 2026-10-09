@@ -3,8 +3,6 @@ import std.colors
 import std.str
 import std.vec
 
-import table
-
 pub func noop() {
     
     
@@ -359,6 +357,464 @@ func num_cells(vals: [int]) -> [str] {
 // block (inline nesting would break column alignment, so fence code
 // never renders in-tree).
 
+// Internal boxed renderer (replaces the vendored table package):
+// framed (rounded/sharp/heavy/double/ascii), markdown, minimal.
+// ANSI-safe widths, titles, footers. No paging/truncation/caps: our
+// tables are small and pre-sanitized. Padding fixed 1, frame always
+// on. Column 0 left-aligned, the rest right (files tables: first two
+// left, the rest right — callers pass aligns explicitly).
+
+func box_style_name(s: str) -> str {
+    if s == "sharp" {
+        return "sharp"
+    }
+    if s == "heavy" {
+        return "heavy"
+    }
+    if s == "double" {
+        return "double"
+    }
+    if s == "markdown" {
+        return "markdown"
+    }
+    if s == "minimal" {
+        return "minimal"
+    }
+    if s == "ascii" {
+        return "ascii"
+    }
+    "rounded"
+}
+
+func box_glyphs(st: str) -> [str] {
+    if st == "sharp" {
+        return ["┌", "┐", "└", "┘", "─", "│", "├", "┤", "┬", "┴", "┼"]
+    }
+    if st == "heavy" {
+        return ["┏", "┓", "┗", "┛", "━", "┃", "┣", "┫", "┳", "┻", "╋"]
+    }
+    if st == "double" {
+        return ["╔", "╗", "╚", "╝", "═", "║", "╠", "╣", "╦", "╩", "╬"]
+    }
+    if st == "ascii" {
+        return ["+", "+", "+", "+", "-", "|", "+", "+", "+", "+", "+"]
+    }
+    ["╭", "╮", "╰", "╯", "─", "│", "├", "┤", "┬", "┴", "┼"]
+}
+
+func box_visible_len(s: str) -> int {
+    chars := str.split(s, "")
+    n:int = 0
+    esc:int = 0
+    i:int = 0
+    total := len(chars)
+    c := ""
+    while i < total {
+        c = chars[i]
+        if c == "\e" {
+            esc = 1
+        } else {
+            if esc == 1 {
+                if c == "m" {
+                    esc = 0
+                }
+            } else {
+                if c != "" {
+                    n = n + 1
+                }
+            }
+        }
+        i = i + 1
+    }
+    n
+}
+
+func box_sanitize(s: str) -> str {
+    r := str.replace(s, "\r", "")
+    r = str.replace(r, "\n", " ")
+    r = str.replace(r, "\t", " ")
+    r
+}
+
+func box_pad_cell(s: str, width: int, mode: str) -> str {
+    v := box_visible_len(s)
+    gap := width - v
+    if gap <= 0 {
+        return s
+    }
+    if mode == "right" {
+        return str.repeat(" ", gap) + s
+    }
+    if mode == "center" {
+        left := gap / 2
+        right := gap - left
+        return str.repeat(" ", left) + s + str.repeat(" ", right)
+    }
+    s + str.repeat(" ", gap)
+}
+
+func box_align_at(aligns: [str], i: int) -> str {
+    if i >= 0 && i < len(aligns) {
+        if aligns[i] == "right" {
+            return "right"
+        }
+        if aligns[i] == "center" {
+            return "center"
+        }
+    }
+    "left"
+}
+
+func box_widths(headers: [str], rows: [[str]], footer: [str]) -> [int] {
+    ncols:int = len(headers)
+    if len(rows) > 0 && len(rows[0]) > ncols {
+        ncols = len(rows[0])
+    }
+    for r in rows {
+        if len(r) > ncols {
+            ncols = len(r)
+        }
+    }
+    if len(footer) > ncols {
+        ncols = len(footer)
+    }
+    widths:[int] = []
+    i:int = 0
+    while i < ncols {
+        widths = vec.push(widths, 0)
+        i = i + 1
+    }
+    i = 0
+    while i < ncols {
+        cell := ""
+        if i < len(headers) {
+            cell = box_sanitize(headers[i])
+        }
+        w := box_visible_len(cell)
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    for r in rows {
+        i = 0
+        while i < ncols {
+            cell := ""
+            if i < len(r) {
+                cell = box_sanitize(r[i])
+            }
+            w := box_visible_len(cell)
+            if w > widths[i] {
+                widths[i] = w
+            }
+            i = i + 1
+        }
+    }
+    i = 0
+    while i < ncols {
+        cell := ""
+        if i < len(footer) {
+            cell = box_sanitize(footer[i])
+        }
+        w := box_visible_len(cell)
+        if w > widths[i] {
+            widths[i] = w
+        }
+        i = i + 1
+    }
+    widths
+}
+
+func box_inner_width(widths: [int]) -> int {
+    total:int = 0
+    i:int = 0
+    n := len(widths)
+    while i < n {
+        total = total + widths[i] + 2
+        i = i + 1
+    }
+    if n > 1 {
+        total = total + (n - 1)
+    }
+    total
+}
+
+func box_rule(g: [str], pos: int, widths: [int]) -> str {
+    left := ""
+    mid := ""
+    right := ""
+    if pos == 0 {
+        left = g[0]
+        right = g[1]
+        mid = g[8]
+    } else {
+        if pos == 2 {
+            left = g[2]
+            right = g[3]
+            mid = g[9]
+        } else {
+            left = g[6]
+            right = g[7]
+            mid = g[10]
+        }
+    }
+    fill := g[4]
+    out := left
+    i:int = 0
+    n := len(widths)
+    while i < n {
+        seg := widths[i] + 2
+        out = out + str.repeat(fill, seg)
+        if i + 1 < n {
+            out = out + mid
+        }
+        i = i + 1
+    }
+    out + right
+}
+
+func box_data_line(cells: [str], widths: [int], v: str, aligns: [str]) -> str {
+    out := v
+    i:int = 0
+    n := len(widths)
+    while i < n {
+        raw := ""
+        if i < len(cells) {
+            raw = box_sanitize(cells[i])
+        }
+        mode := box_align_at(aligns, i)
+        out = out + " " + box_pad_cell(raw, widths[i], mode) + " "
+        if i + 1 < n {
+            out = out + v
+        }
+        i = i + 1
+    }
+    out + v
+}
+
+pub func box_lang_aligns(ncols: int) -> [str] {
+    box_num_aligns(ncols, false)
+}
+
+pub func box_file_aligns(ncols: int) -> [str] {
+    box_num_aligns(ncols, true)
+}
+
+pub func box_render(headers: [str], rows: [[str]], footer: [str], title: str, style: str, aligns: [str]) -> str {
+    st := box_style_name(style)
+    if st == "markdown" {
+        return box_render_markdown(headers, rows, footer, title, aligns)
+    }
+    if st == "minimal" {
+        return box_render_minimal(headers, rows, footer, title, aligns)
+    }
+    box_render_framed(headers, rows, footer, title, st, aligns)
+}
+
+func box_num_aligns(ncols: int, first_left_two: bool) -> [str] {
+    out:[str] = []
+    i:int = 0
+    while i < ncols {
+        if i == 0 {
+            out = vec.push(out, "left")
+        } else {
+            if i == 1 && first_left_two {
+                out = vec.push(out, "left")
+            } else {
+                out = vec.push(out, "right")
+            }
+        }
+        i = i + 1
+    }
+    out
+}
+
+func box_render_framed(headers: [str], rows: [[str]], footer: [str], title: str, st: str, aligns: [str]) -> str {
+    widths := box_widths(headers, rows, footer)
+    ncols := len(widths)
+    if ncols == 0 {
+        return ""
+    }
+    g := box_glyphs(st)
+    v := g[5]
+    lines:[str] = []
+    if len(title) > 0 {
+        w := box_inner_width(widths) + 2
+        tw := box_visible_len(title)
+        line := box_sanitize(title)
+        if tw < w {
+            gap := w - tw
+            left := gap / 2
+            right := gap - left
+            line = str.repeat(" ", left) + line + str.repeat(" ", right)
+        }
+        lines = vec.push(lines, line)
+    }
+    lines = vec.push(lines, box_rule(g, 0, widths))
+    lines = vec.push(lines, box_data_line(headers, widths, v, aligns))
+    has_body:bool = len(rows) > 0
+    has_foot:bool = len(footer) > 0
+    if has_body || has_foot {
+        lines = vec.push(lines, box_rule(g, 1, widths))
+    }
+    for r in rows {
+        lines = vec.push(lines, box_data_line(r, widths, v, aligns))
+    }
+    if has_foot {
+        if has_body {
+            lines = vec.push(lines, box_rule(g, 1, widths))
+        }
+        lines = vec.push(lines, box_data_line(footer, widths, v, aligns))
+    }
+    lines = vec.push(lines, box_rule(g, 2, widths))
+    vec.join(lines, "\n") + "\n"
+}
+
+func box_md_line(cells: [str], outer: int) -> str {
+    body := vec.join(cells, " | ")
+    if outer == 1 {
+        return "| " + body + " |"
+    }
+    body
+}
+
+func box_render_markdown(headers: [str], rows: [[str]], footer: [str], title: str, aligns: [str]) -> str {
+    widths := box_widths(headers, rows, footer)
+    ncols := len(widths)
+    if ncols == 0 {
+        return ""
+    }
+    i:int = 0
+    while i < ncols {
+        if widths[i] < 3 {
+            widths[i] = 3
+        }
+        i = i + 1
+    }
+    lines:[str] = []
+    if len(title) > 0 {
+        lines = vec.push(lines, "# " + box_sanitize(title))
+    }
+    hp:[str] = []
+    mp:[str] = []
+    i = 0
+    while i < ncols {
+        raw := ""
+        if i < len(headers) {
+            raw = box_sanitize(headers[i])
+        }
+        mode := box_align_at(aligns, i)
+        hp = vec.push(hp, box_pad_cell(raw, widths[i], mode))
+        mark := str.repeat("-", widths[i])
+        if mode == "right" {
+            mark = str.repeat("-", widths[i] - 1) + ":"
+        }
+        mp = vec.push(mp, mark)
+        i = i + 1
+    }
+    lines = vec.push(lines, box_md_line(hp, 1))
+    lines = vec.push(lines, box_md_line(mp, 1))
+    for r in rows {
+        rp:[str] = []
+        i = 0
+        while i < ncols {
+            raw := ""
+            if i < len(r) {
+                raw = box_sanitize(r[i])
+            }
+            mode := box_align_at(aligns, i)
+            rp = vec.push(rp, box_pad_cell(raw, widths[i], mode))
+            i = i + 1
+        }
+        lines = vec.push(lines, box_md_line(rp, 1))
+    }
+    if len(footer) > 0 {
+        rp:[str] = []
+        i = 0
+        while i < ncols {
+            raw := ""
+            if i < len(footer) {
+                raw = box_sanitize(footer[i])
+            }
+            rp = vec.push(rp, box_pad_cell(raw, widths[i], box_align_at(aligns, i)))
+            i = i + 1
+        }
+        lines = vec.push(lines, box_md_line(rp, 1))
+    }
+    vec.join(lines, "\n") + "\n"
+}
+
+func box_render_minimal(headers: [str], rows: [[str]], footer: [str], title: str, aligns: [str]) -> str {
+    widths := box_widths(headers, rows, footer)
+    ncols := len(widths)
+    if ncols == 0 {
+        return ""
+    }
+    gap2 := "  "
+    lines:[str] = []
+    if len(title) > 0 {
+        lines = vec.push(lines, box_sanitize(title))
+    }
+    header := ""
+    i:int = 0
+    while i < ncols {
+        raw := ""
+        if i < len(headers) {
+            raw = box_sanitize(headers[i])
+        }
+        header = header + box_pad_cell(raw, widths[i], box_align_at(aligns, i))
+        if i + 1 < ncols {
+            header = header + gap2
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, header)
+    rule := ""
+    i = 0
+    while i < ncols {
+        rule = rule + str.repeat("─", widths[i])
+        if i + 1 < ncols {
+            rule = rule + gap2
+        }
+        i = i + 1
+    }
+    lines = vec.push(lines, rule)
+    for r in rows {
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := ""
+            if i < len(r) {
+                raw = box_sanitize(r[i])
+            }
+            row = row + box_pad_cell(raw, widths[i], box_align_at(aligns, i))
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    if len(footer) > 0 {
+        lines = vec.push(lines, rule)
+        row := ""
+        i = 0
+        while i < ncols {
+            raw := ""
+            if i < len(footer) {
+                raw = box_sanitize(footer[i])
+            }
+            row = row + box_pad_cell(raw, widths[i], box_align_at(aligns, i))
+            if i + 1 < ncols {
+                row = row + gap2
+            }
+            i = i + 1
+        }
+        lines = vec.push(lines, row)
+    }
+    vec.join(lines, "\n") + "\n"
+}
+
 pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool, boxed: bool) {
     t = sort_table(t, sort, rev)
     tot := totals(t)
@@ -366,18 +822,14 @@ pub func print_table_full(t: Table, emb: Table, th: Theme, sort: str, rev: bool,
         print_table_plain(t, emb, th, tot)
         return
     }
-    bt := table.new(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]))
-    bt = table.set_style(bt, th.style)
-    for c in 1..6 {
-        bt = table.set_align(bt, c, "right")
-    }
+    rows:[[str]] = []
     for i in 0..len(t.langs) {
-        bt = table.add_row(bt, [lang_text(th, t.langs[i]), str(t.files[i]), str(t.lines[i]), str(t.code[i]), str(t.comments[i]), str(t.blanks[i])])
+        rows = vec.push(rows, [lang_text(th, t.langs[i]), str(t.files[i]), str(t.lines[i]), str(t.code[i]), str(t.comments[i]), str(t.blanks[i])])
     }
-    bt = table.set_footer(bt, [maybe_bold(th, apply_color(th, th.total, "Total")), maybe_bold(th, apply_color(th, th.total, str(tot[0]))), maybe_bold(th, apply_color(th, th.total, str(tot[1]))), maybe_bold(th, apply_color(th, th.total, str(tot[2]))), maybe_bold(th, apply_color(th, th.total, str(tot[3]))), maybe_bold(th, apply_color(th, th.total, str(tot[4])))])
-    println(table.render(bt))
+    foot := [maybe_bold(th, apply_color(th, th.total, "Total")), maybe_bold(th, apply_color(th, th.total, str(tot[0]))), maybe_bold(th, apply_color(th, th.total, str(tot[1]))), maybe_bold(th, apply_color(th, th.total, str(tot[2]))), maybe_bold(th, apply_color(th, th.total, str(tot[3]))), maybe_bold(th, apply_color(th, th.total, str(tot[4])))]
+    print(box_render(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]), rows, foot, "", th.style, box_lang_aligns(6)))
     if len(emb.langs) > 0 {
-        print_emb_section(emb, th, false)
+        print_emb_section(emb, th, boxed)
     }
 }
 
@@ -517,21 +969,16 @@ pub func print_files_section(root: str, paths: [str], langs: [str], lines: [int]
         print_files_plain(root, paths, langs, lines, code, comments, blanks, idx, shown, th)
         return
     }
-    bt := table.new(head_cells(th, ["File", "Language", "Lines", "Code", "Comments", "Blanks"]))
-    bt = table.set_style(bt, th.style)
-    bt = table.set_title(bt, "Top {shown} files by lines")
-    for c in 2..6 {
-        bt = table.set_align(bt, c, "right")
-    }
+    rows:[[str]] = []
     for k in idx {
         rel := paths[k]
         prefix := root + "/"
         if str.starts_with(rel, prefix) {
             rel = rel[len(prefix):len(rel)]
         }
-        bt = table.add_row(bt, [display_path(rel), lang_text(th, langs[k]), str(lines[k]), str(code[k]), str(comments[k]), str(blanks[k])])
+        rows = vec.push(rows, [display_path(rel), lang_text(th, langs[k]), str(lines[k]), str(code[k]), str(comments[k]), str(blanks[k])])
     }
-    println(table.render(bt))
+    print(box_render(head_cells(th, ["File", "Language", "Lines", "Code", "Comments", "Blanks"]), rows, [], "Top {shown} files by lines", th.style, box_file_aligns(6)))
 }
 
 func print_files_plain(root: str, paths: [str], langs: [str], lines: [int], code: [int], comments: [int], blanks: [int], idx: [int], shown: int, th: Theme) {
@@ -579,12 +1026,7 @@ pub func print_emb_section(emb: Table, th: Theme, boxed: bool) {
         print_emb_plain(t, th)
         return
     }
-    bt := table.new(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]))
-    bt = table.set_style(bt, th.style)
-    bt = table.set_title(bt, "Embedded code")
-    for c in 1..6 {
-        bt = table.set_align(bt, c, "right")
-    }
+    rows:[[str]] = []
     for i in 0..len(t.langs) {
         lang := emb_base_lang(t.langs[i])
         // section rows follow per-language overrides, else the default
@@ -598,11 +1040,11 @@ pub func print_emb_section(emb: Table, th: Theme, boxed: bool) {
         if th.color {
             c1 = colors.dim(maybe_bold(th, apply_color(th, spec, c1)))
         }
-        bt = table.add_row(bt, [c1, str(t.files[i]), str(t.lines[i]), str(t.code[i]), str(t.comments[i]), str(t.blanks[i])])
+        rows = vec.push(rows, [c1, str(t.files[i]), str(t.lines[i]), str(t.code[i]), str(t.comments[i]), str(t.blanks[i])])
     }
     tot := totals(t)
-    bt = table.set_footer(bt, [maybe_bold(th, apply_color(th, th.total, "Total")), str(tot[0]), str(tot[1]), str(tot[2]), str(tot[3]), str(tot[4])])
-    println(table.render(bt))
+    foot := [maybe_bold(th, apply_color(th, th.total, "Total")), str(tot[0]), str(tot[1]), str(tot[2]), str(tot[3]), str(tot[4])]
+    print(box_render(head_cells(th, ["Language", "Files", "Lines", "Code", "Comments", "Blanks"]), rows, foot, "Embedded code", th.style, box_lang_aligns(6)))
 }
 
 func print_emb_plain(t: Table, th: Theme) {
