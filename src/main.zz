@@ -1,5 +1,5 @@
 // zcc — blazing-fast code counter (tokei clone) in ZZ.
-// Usage: zcc [path] [--output json] [--hidden] [--no-ignore] [--only LANG] [--help]
+// Usage: zcc [path] [--format table|json] [--hidden] [--no-ignore] [--only LANG] [--help]
 // NOTE: `zz build` cache-keys only the entry file — after editing any other
 // module, change this file's bytes too (or the old binary is re-served).
 // (Upstream cache-invalidation bug; entry rev 26.)
@@ -40,7 +40,8 @@ func print_help() {
     println("    [path]              directory or file (default: .)")
     println("")
     println("FLAGS:")
-    println("    --output json       machine-readable JSON to stdout")
+    println("    --format table|json   output as table (default) or machine-readable JSON")
+    println("                          (--output is an alias)")
     println("    --hidden            include hidden files/dirs")
     println("    --no-ignore         skip .gitignore rules (still skips .git)")
     println("    --no-cache          skip the count cache (always recount)")
@@ -80,6 +81,7 @@ func main(cli_args: [str]) {
     // Hand-rolled flag parsing (robust vs leading "--" from `zz run --`).
     target := "."
     out_json := false
+    out_next := false
     include_hidden := false
     use_ignore := true
     use_cache := true
@@ -146,15 +148,35 @@ func main(cli_args: [str]) {
             out_json = true
             continue
         }
-        if a == "--output" {
-            out_json = true
+        if a == "--output" || a == "--format" {
+            out_next = true
             continue
         }
-        if str.starts_with(a, "--output=") {
+        if str.starts_with(a, "--output=") || str.starts_with(a, "--format=") {
             v := str.split(a, "=")[1]
             if v == "json" {
                 out_json = true
+            } else {
+                if v == "table" {
+                    out_json = false
+                } else {
+                    println("unknown output format: {v} (table|json)")
+                }
             }
+            out_next = false
+            continue
+        }
+        if out_next {
+            if a == "json" {
+                out_json = true
+            } else {
+                if a == "table" {
+                    out_json = false
+                } else {
+                    println("unknown output format: {a} (table|json)")
+                }
+            }
+            out_next = false
             continue
         }
         if a == "json" && out_json {
