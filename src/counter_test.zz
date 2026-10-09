@@ -7,6 +7,7 @@ import std.str
 import std.time
 import std.vec
 
+import blame
 import cache
 import config
 import counter
@@ -1034,4 +1035,14 @@ func test_diff_stats() {
     mi := report.find_lang(res.t, "Markdown")
     assert(mi >= 0)
     assert_eq(res.t.files[mi], 1)
+}
+
+@test
+func test_blame_parse() {
+    sample := "abc123 1 1 2\nauthor Jane Doe\nauthor-mail <j@x.io>\ncommitter Jane Doe\nxyz789 2 2\nunknown line\nauthor Bot\n"
+    names := blame.parse_blame_authors(sample)
+    assert_eq(len(names), 2)
+    assert_eq(names[0], "Jane Doe")
+    assert_eq(names[1], "Bot")
+    assert_eq(len(blame.parse_blame_authors("")), 0)
 }
