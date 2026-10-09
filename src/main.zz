@@ -13,6 +13,7 @@ import std.vec
 import cache
 import config
 import counter
+import diff
 import languages
 import parallel
 import report
@@ -65,6 +66,7 @@ func print_help() {
     println("")
     println("EXAMPLES:")
     println("    zcc init            write ~/.config/zcc/config.json")
+    println("    zcc diff [BASE]     per-language added/removed vs BASE (default HEAD)")
     println("    zcc .")
     println("    zcc src/ --only Rust")
     println("    zcc . --output json > counts.json")
@@ -219,6 +221,25 @@ func main(cli_args: [str]) {
     // init subcommand (exact word only: ./init still counts as a path)
     if target == "init" {
         println(config.init_config(languages.config_dir(), force))
+        return
+    }
+    // diff subcommand: `zcc diff [BASE]` (default HEAD). The token after
+    // `diff` is the base ref, not a path.
+    if target == "diff" {
+        base := "HEAD"
+        for a in cli_args {
+            if a == "diff" || a == "--" {
+                continue
+            }
+            if str.starts_with(a, "--") {
+                continue
+            }
+            if a != "." {
+                base = a
+                break
+            }
+        }
+        diff.run_diff(base)
         return
     }
     // resolve target
