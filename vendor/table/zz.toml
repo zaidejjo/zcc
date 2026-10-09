@@ -1,0 +1,9 @@
+[package]
+name = "table"
+version = "0.6.0"
+description = "Beautiful rounded CLI tables, pure ZZ, zero dependencies. 7 styles, alignment, colors-safe widths."
+license = "MIT"
+category = "utilities"
+keywords = ["table", "cli", "terminal", "unicode", "display"]
+
+[dependencies]

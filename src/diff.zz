@@ -12,6 +12,7 @@ import std.vec
 import config
 import languages
 import report
+import table
 
 pub func run_diff(base: str) {
     if base == "" {
@@ -92,30 +93,19 @@ pub func diff_stats(em: languages.ExtMap, out: str) -> DiffStat {
 func print_diff_table(t: report.Table, added: [int], removed: [int], nfiles: int, base: str) {
     // Sort by added desc via index pick (reuse top_by_lines on added).
     idx := report.top_by_lines(added, len(added))
-    bar := "────────────────────────────────────────────────────────────────"
-    println(bar)
-    h1 := report.pad_r("Language", 16)
-    h2 := report.pad_l("Files", 8)
-    h3 := report.pad_l("Added", 10)
-    h4 := report.pad_l("Removed", 10)
-    println("{h1}{h2}{h3}{h4}")
-    println(bar)
+    th := report.default_theme()
+    bt := table.new(["Language", "Files", "Added", "Removed"])
+    bt = table.set_style(bt, th.style)
+    for c in 1..4 {
+        bt = table.set_align(bt, c, "right")
+    }
     ta := 0
     tr := 0
     for k in idx {
-        c1 := report.pad_r(report.display_name(t.langs[k]), 16)
-        c2 := report.pad_l(str(t.files[k]), 8)
-        c3 := report.pad_l("+" + str(added[k]), 10)
-        c4 := report.pad_l("-" + str(removed[k]), 10)
-        println("{c1}{c2}{c3}{c4}")
+        bt = table.add_row(bt, [report.display_name(t.langs[k]), str(t.files[k]), "+" + str(added[k]), "-" + str(removed[k])])
         ta = ta + added[k]
         tr = tr + removed[k]
     }
-    println(bar)
-    tc1 := report.pad_r("Total", 16)
-    tc2 := report.pad_l(str(nfiles), 8)
-    tc3 := report.pad_l("+" + str(ta), 10)
-    tc4 := report.pad_l("-" + str(tr), 10)
-    println("{tc1}{tc2}{tc3}{tc4}")
-    println(bar)
+    bt = table.set_footer(bt, ["Total", str(nfiles), "+" + str(ta), "-" + str(tr)])
+    println(table.render(bt))
 }

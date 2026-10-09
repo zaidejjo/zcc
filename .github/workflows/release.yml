@@ -54,6 +54,7 @@ jobs:
       - name: Test + release build
         working-directory: zcc
         run: |
+          zz install
           zz test
           zz build -p src/main.zz
           ./src/bin/main --no-cache . --output json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['total'])"

@@ -212,5 +212,9 @@ pub func build_theme(cfg: json) -> report.Theme {
             }
         }
     }
-    report.make_theme(color, header, language, total, names, specs)
+    style := "rounded"
+    if json.type(disp) == "object" {
+        style = obj_str(disp, "style", style)
+    }
+    report.make_theme(color, header, language, total, names, specs, style)
 }
