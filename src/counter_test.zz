@@ -576,6 +576,37 @@ func test_scan_file_matches_classify() {
 }
 
 @test
+func test_scan_file_skips_invalid_utf8() {
+    // Invalid UTF-8 is unreadable, like read_to_string (VM parity):
+    // scan reports -1 and the chunk marks the file skipped. (Native
+    // read_to_string is lenient and counts the bytes; the fused path
+    // follows the strict VM behavior.) Octal printf: POSIX, dash-safe.
+    base := fs.join(env.temp_dir(), "zcc_scan_raw")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    match fs.mkdir_all(base) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    raw := fs.join(base, "bad.toml")
+    match process.run("sh", ["-c", "printf 'a\\303\\n' > {raw}"]) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("printf: {e}")
+    }
+    m := languages.resolve_markers(json.null(), "TOML", [])
+    r := counter.scan_file(raw, "TOML", m[0], "", "")
+    assert_eq(r[0], -1)
+    out := run_chunk([raw], ["TOML"], ["TOML"], 0, 1)
+    assert_eq(out.oks, [0])
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
+
+@test
 func test_match_pat_parity() {
     // compile_pats + match_pat must agree with match_one/is_ignored_by
     // on every (pattern, path) pair, including negations and empties.
