@@ -78,6 +78,72 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
     oks := []
     gens := []
     for i in start..end {
+        markers := split_markers(mjoined[i])
+        // Fused fast path for plain langs: one scan call replaces
+        // read + NUL check + classify. Embed-capable langs keep the
+        // text path below (their ZZ loops disagree with raw classify),
+        // and the Generated path needs no text at all (counts in hand,
+        // embeds dropped by the merger).
+        emb := langs[i] == "Markdown" || langs[i] == "Mdx" || langs[i] == "Astro" || langs[i] == "Vue" || langs[i] == "Svelte" || langs[i] == "Jupyter"
+        if !emb {
+            r := counter.scan_file(paths[i], langs[i], markers, bstarts[i], bends[i])
+            if r[0] < 0 || r[4] == 1 {
+                lines = vec.push(lines, 0)
+                code = vec.push(code, 0)
+                comments = vec.push(comments, 0)
+                blanks = vec.push(blanks, 0)
+                fencs = vec.push(fencs, "")
+                oks = vec.push(oks, 0)
+                gens = vec.push(gens, 0)
+                continue
+            }
+            if shows[i] != langs[i] {
+                lines = vec.push(lines, r[0])
+                code = vec.push(code, r[1])
+                comments = vec.push(comments, r[2])
+                blanks = vec.push(blanks, r[3])
+                fencs = vec.push(fencs, "")
+                oks = vec.push(oks, 1)
+                gens = vec.push(gens, 0)
+                continue
+            }
+            match fs.read_to_string(paths[i]) {
+                .ok(text) => {
+                    if walker.has_nul(text) {
+                        lines = vec.push(lines, 0)
+                        code = vec.push(code, 0)
+                        comments = vec.push(comments, 0)
+                        blanks = vec.push(blanks, 0)
+                        fencs = vec.push(fencs, "")
+                        oks = vec.push(oks, 0)
+                        gens = vec.push(gens, 0)
+                        continue
+                    }
+                    gen := 0
+                    if shows[i] != "Generated" && walker.is_generated_content(text) {
+                        gen = 1
+                    }
+                    lines = vec.push(lines, r[0])
+                    code = vec.push(code, r[1])
+                    comments = vec.push(comments, r[2])
+                    blanks = vec.push(blanks, r[3])
+                    fencs = vec.push(fencs, "")
+                    oks = vec.push(oks, 1)
+                    gens = vec.push(gens, gen)
+                    continue
+                }
+                .err(_) => {
+                    lines = vec.push(lines, 0)
+                    code = vec.push(code, 0)
+                    comments = vec.push(comments, 0)
+                    blanks = vec.push(blanks, 0)
+                    fencs = vec.push(fencs, "")
+                    oks = vec.push(oks, 0)
+                    gens = vec.push(gens, 0)
+                    continue
+                }
+            }
+        }
         match fs.read_to_string(paths[i]) {
             .ok(text) => {
                 if walker.has_nul(text) {
@@ -94,7 +160,6 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                 if shows[i] != "Generated" && walker.is_generated_content(text) {
                     gen = 1
                 }
-                markers := split_markers(mjoined[i])
                 c := counter.count_content_with(text, langs[i], markers, bstarts[i], bends[i])
                 lines = vec.push(lines, c.lines)
                 code = vec.push(code, c.code)

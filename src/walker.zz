@@ -515,10 +515,10 @@ func gen_dir(path: str) -> bool {
 }
 
 pub func rel_path(root: str, full: str) -> str {
-    # NOTE: single-char splits/joins only — AOT str.split with a
-    # multi-char separator drops the remainder (toolchain bug), so a
-    # previous `split(full, root + "/")` version returned "" natively
-    # and silently disabled every rel-based skip rule.
+    // NOTE: single-char splits/joins only — AOT str.split with a
+    // multi-char separator drops the remainder (toolchain bug), so a
+    // previous `split(full, root + "/")` version returned "" natively
+    // and silently disabled every rel-based skip rule.
     prefix := root + "/"
     if str.starts_with(full, prefix) {
         rsegs := str.split(full, "/")

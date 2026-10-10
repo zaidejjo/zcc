@@ -324,23 +324,32 @@ func run_single(path: str, only: str, out_json: bool, boxed: bool) {
         println("zcc: {path} is {lang}, filtered by --only {only}")
         return
     }
-    match fs.read_to_string(path) {
-        .ok(text) => {
-            if walker.has_nul(text) {
-                println("zcc: skipping binary {path}")
-                return
-            }
-            rules := languages.resolve_markers(table, lang, customs)
-            c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
-            t := report.new_table()
-            t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
-            if out_json {
-                println(report.to_json(t, report.new_table()))
-            } else {
-                report.print_table(t, th, boxed)
-            }
-        }
-        .err(e) => println("zcc: cannot read {path}: {e}")
+    rules := languages.resolve_markers(table, lang, customs)
+    // Fused single-file count: scan carries read + NUL-sniff + classify
+    // in one call, so no text is ever materialized. (Unreadable loses
+    // the errno detail the old read printed; dir/serial modes skip
+    // silently either way.)
+    r := counter.scan_file(path, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
+    if r[0] < 0 {
+        println("zcc: cannot read {path}")
+        return
+    }
+    if r[4] == 1 {
+        println("zcc: skipping binary {path}")
+        return
+    }
+    c := counter.zero()
+    c.files = 1
+    c.lines = r[0]
+    c.code = r[1]
+    c.comments = r[2]
+    c.blanks = r[3]
+    t := report.new_table()
+    t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
+    if out_json {
+        println(report.to_json(t, report.new_table()))
+    } else {
+        report.print_table(t, th, boxed)
     }
 }
 

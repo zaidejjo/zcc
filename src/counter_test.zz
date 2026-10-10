@@ -530,6 +530,83 @@ func test_count_with_matches_plain() {
 }
 
 @test
+func test_scan_file_matches_classify() {
+    // scan_file agrees with read + has_nul + count_content_with on code,
+    // flags NUL binaries with zeroed counts, and reports -1 for missing.
+    base := fs.join(env.temp_dir(), "zcc_scan_test")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    match fs.mkdir_all(base) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    src := "// hi\nfn f() {}\n\n"
+    rp := fs.join(base, "a.rs")
+    match fs.write(rp, src) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    bp := fs.join(base, "d.bin")
+    match fs.write(bp, "ab\x00cd") {
+        .ok(_) => walker.noop()
+        .err(e) => fail("write: {e}")
+    }
+    m := languages.resolve_markers(json.null(), "Rust", [])
+    b0 := ""
+    b1 := ""
+    if len(m[1]) > 0 {
+        b0 = m[1][0]
+    }
+    if len(m[2]) > 0 {
+        b1 = m[2][0]
+    }
+    c := counter.count_content_with(src, "Rust", m[0], b0, b1)
+    r := counter.scan_file(rp, "Rust", m[0], b0, b1)
+    assert_eq(r, [c.lines, c.code, c.comments, c.blanks, 0])
+    b := counter.scan_file(bp, "Rust", m[0], b0, b1)
+    assert_eq(b, [0, 0, 0, 0, 1])
+    n := counter.scan_file(fs.join(base, "nope.rs"), "Rust", m[0], b0, b1)
+    assert_eq(n[0], -1)
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
+
+@test
+func test_scan_file_skips_invalid_utf8() {
+    // Invalid UTF-8 is unreadable, like read_to_string (VM parity):
+    // scan reports -1 and the chunk marks the file skipped. (Native
+    // read_to_string is lenient and counts the bytes; the fused path
+    // follows the strict VM behavior.) Octal printf: POSIX, dash-safe.
+    base := fs.join(env.temp_dir(), "zcc_scan_raw")
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+    match fs.mkdir_all(base) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("mkdir: {e}")
+    }
+    raw := fs.join(base, "bad.toml")
+    match process.run("sh", ["-c", "printf 'a\\303\\n' > {raw}"]) {
+        .ok(_) => walker.noop()
+        .err(e) => fail("printf: {e}")
+    }
+    m := languages.resolve_markers(json.null(), "TOML", [])
+    r := counter.scan_file(raw, "TOML", m[0], "", "")
+    assert_eq(r[0], -1)
+    out := run_chunk([raw], ["TOML"], ["TOML"], 0, 1)
+    assert_eq(out.oks, [0])
+    match fs.remove_dir_all(base) {
+        .ok(_) => walker.noop()
+        .err(_) => walker.noop()
+    }
+}
+
+@test
 func test_match_pat_parity() {
     // compile_pats + match_pat must agree with match_one/is_ignored_by
     // on every (pattern, path) pair, including negations and empties.
