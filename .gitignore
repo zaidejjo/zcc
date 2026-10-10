@@ -3,3 +3,6 @@ vendor/
 build/
 src/bin/
 .opencode/
+
+# zz: fetched deps, native build outputs, compiled binaries
+bin/
