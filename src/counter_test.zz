@@ -261,6 +261,24 @@ func test_is_generated() {
 }
 
 @test
+func test_show_for_parts_matches_is_generated() {
+    // show_for_parts (pre-extracted fast path) must agree with
+    // is_generated on every path shape: lockfiles, min/bundle,
+    // protobuf, _generated_, generated/ dirs, plain, ext-less.
+    paths := ["a/bundle.min.js", "a/app.min.css", "dist/app.bundle.js", "x/package-lock.json", "Cargo.lock", "poetry.lock", "pnpm-lock.yaml", "a/msg.pb.go", "a/msg.pb.cc", "a/msg.pb.h", "a/msg.pb.py", "a/msg_pb2.py", "a/x.g.dart", "a/foo_generated.rs", "a/foo.generated.ts", "a/generated/b.py", "generated/b.py", "a/app.js", "a/main.rs", "a/generate.py", "a/Cargo.toml", "a/lockfile.txt", "Makefile", "a/APP.MIN.JS", "a/b.JS"]
+    langs := ["JavaScript", "Css", "JavaScript", "Json", "TOML", "TOML", "Yaml", "Go", "C++", "C Header", "Python", "Python", "Dart", "Rust", "TypeScript", "Python", "Python", "JavaScript", "Rust", "Python", "TOML", "Text", "Makefile", "JavaScript", "JavaScript"]
+    for i in 0..len(paths) {
+        p := paths[i]
+        want := langs[i]
+        if walker.is_generated(p) {
+            want = "Generated"
+        }
+        got := walker.show_for_parts(langs[i], p, fs.basename(p), fs.extension(fs.basename(p)))
+        assert_eq(got, want)
+    }
+}
+
+@test
 func test_top_by_lines() {
     idx := report.top_by_lines([5, 20, 10], 2)
     assert_eq(len(idx), 2)

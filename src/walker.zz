@@ -407,47 +407,67 @@ pub func default_skip(name: str) -> bool {
 
 pub func is_generated(path: str) -> bool {
     b := fs.basename(path)
-    if b == "package-lock.json" || b == "yarn.lock" || b == "Gemfile.lock" {
-        return true
+    show_for_parts("", path, b, fs.extension(b)) == "Generated"
+}
+
+// Show-dispatch shared by run_dir phase-1 (which passes pre-extracted
+// base/ext so big trees avoid re-extraction per file) and is_generated
+// above. Pure function of its args: identical branches, single source,
+// so the fast path can never drift from the canonical check.
+
+pub func show_for_parts(lang: str, path: str, base: str, extb: str) -> str {
+    gen := false
+    if base == "package-lock.json" || base == "yarn.lock" || base == "Gemfile.lock" {
+        gen = true
     }
-    if b == "composer.lock" || b == "Cargo.lock" || b == "Podfile.lock" {
-        return true
+    if !gen && (base == "composer.lock" || base == "Cargo.lock" || base == "Podfile.lock") {
+        gen = true
     }
-    if b == "poetry.lock" || b == "pnpm-lock.yaml" {
-        return true
+    if !gen && (base == "poetry.lock" || base == "pnpm-lock.yaml") {
+        gen = true
     }
-    ext := fs.extension(b)
-    if ext == "js" || ext == "css" {
-        if str.ends_with(b, ".min.js") || str.ends_with(b, ".min.css") {
-            return true
+    if !gen {
+        if extb == "js" || extb == "css" {
+            if str.ends_with(base, ".min.js") || str.ends_with(base, ".min.css") {
+                gen = true
+            }
+            if !gen && (str.ends_with(base, ".bundle.js") || str.ends_with(base, "-bundle.js")) {
+                gen = true
+            }
+            if !gen {
+                gen = gen_dir(path)
+            }
+        } else if extb == "" {
+            gen = gen_dir(path)
+        } else if extb == "go" || extb == "cc" || extb == "h" || extb == "py" || extb == "dart" {
+            if str.ends_with(base, ".pb.go") || str.ends_with(base, ".pb.cc") {
+                gen = true
+            }
+            if !gen && (str.ends_with(base, ".pb.h") || str.ends_with(base, ".pb.py")) {
+                gen = true
+            }
+            if !gen && (str.ends_with(base, "_pb2.py") || str.ends_with(base, ".g.dart")) {
+                gen = true
+            }
+            if !gen && (str.contains(base, "_generated.") || str.contains(base, ".generated.")) {
+                gen = true
+            }
+            if !gen {
+                gen = gen_dir(path)
+            }
+        } else {
+            if str.contains(base, "_generated.") || str.contains(base, ".generated.") {
+                gen = true
+            }
+            if !gen {
+                gen = gen_dir(path)
+            }
         }
-        if str.ends_with(b, ".bundle.js") || str.ends_with(b, "-bundle.js") {
-            return true
-        }
-        return gen_dir(path)
     }
-    if ext == "" {
-        return gen_dir(path)
+    if gen {
+        return "Generated"
     }
-    if ext == "go" || ext == "cc" || ext == "h" || ext == "py" || ext == "dart" {
-        if str.ends_with(b, ".pb.go") || str.ends_with(b, ".pb.cc") {
-            return true
-        }
-        if str.ends_with(b, ".pb.h") || str.ends_with(b, ".pb.py") {
-            return true
-        }
-        if str.ends_with(b, "_pb2.py") || str.ends_with(b, ".g.dart") {
-            return true
-        }
-        if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
-            return true
-        }
-        return gen_dir(path)
-    }
-    if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
-        return true
-    }
-    gen_dir(path)
+    lang
 }
 
 // Content signals (called with the file body already in hand):
@@ -510,7 +530,7 @@ pub func is_generated_content(text: str) -> bool {
 // Inside a generated/ tree everything counts generated (scanning
 // generated/ itself marks the whole subtree, which is honest).
 
-func gen_dir(path: str) -> bool {
+pub func gen_dir(path: str) -> bool {
     str.contains(path, "/generated/") || str.starts_with(path, "generated/")
 }
 
