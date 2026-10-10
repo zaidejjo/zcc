@@ -107,42 +107,33 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                 gens = vec.push(gens, 0)
                 continue
             }
-            match fs.read_to_string(paths[i]) {
-                .ok(text) => {
-                    if walker.has_nul(text) {
-                        lines = vec.push(lines, 0)
-                        code = vec.push(code, 0)
-                        comments = vec.push(comments, 0)
-                        blanks = vec.push(blanks, 0)
-                        fencs = vec.push(fencs, "")
-                        oks = vec.push(oks, 0)
-                        gens = vec.push(gens, 0)
-                        continue
-                    }
-                    gen := 0
-                    if shows[i] != "Generated" && walker.is_generated_content(text) {
-                        gen = 1
-                    }
-                    lines = vec.push(lines, r[0])
-                    code = vec.push(code, r[1])
-                    comments = vec.push(comments, r[2])
-                    blanks = vec.push(blanks, r[3])
-                    fencs = vec.push(fencs, "")
-                    oks = vec.push(oks, 1)
-                    gens = vec.push(gens, gen)
-                    continue
-                }
-                .err(_) => {
-                    lines = vec.push(lines, 0)
-                    code = vec.push(code, 0)
-                    comments = vec.push(comments, 0)
-                    blanks = vec.push(blanks, 0)
-                    fencs = vec.push(fencs, "")
-                    oks = vec.push(oks, 0)
-                    gens = vec.push(gens, 0)
-                    continue
-                }
+            // Fused generated check: one path-only call, no text crossing
+            // (the file was just read cache-hot by the scan above; an
+            // unreadable race skips exactly like a read error did, and
+            // counts always come from the scan snapshot).
+            g := counter.is_generated_file(paths[i])
+            if g < 0 {
+                lines = vec.push(lines, 0)
+                code = vec.push(code, 0)
+                comments = vec.push(comments, 0)
+                blanks = vec.push(blanks, 0)
+                fencs = vec.push(fencs, "")
+                oks = vec.push(oks, 0)
+                gens = vec.push(gens, 0)
+                continue
             }
+            gen := 0
+            if g == 1 {
+                gen = 1
+            }
+            lines = vec.push(lines, r[0])
+            code = vec.push(code, r[1])
+            comments = vec.push(comments, r[2])
+            blanks = vec.push(blanks, r[3])
+            fencs = vec.push(fencs, "")
+            oks = vec.push(oks, 1)
+            gens = vec.push(gens, gen)
+            continue
         }
         match fs.read_to_string(paths[i]) {
             .ok(text) => {
@@ -157,8 +148,21 @@ pub func count_files(paths: [str], langs: [str], shows: [str], mjoined: [str], b
                     continue
                 }
                 gen := 0
-                if shows[i] != "Generated" && walker.is_generated_content(text) {
-                    gen = 1
+                if shows[i] == langs[i] {
+                    g := counter.is_generated_file(paths[i])
+                    if g < 0 {
+                        lines = vec.push(lines, 0)
+                        code = vec.push(code, 0)
+                        comments = vec.push(comments, 0)
+                        blanks = vec.push(blanks, 0)
+                        fencs = vec.push(fencs, "")
+                        oks = vec.push(oks, 0)
+                        gens = vec.push(gens, 0)
+                        continue
+                    }
+                    if g == 1 {
+                        gen = 1
+                    }
                 }
                 c := counter.count_content_with(text, langs[i], markers, bstarts[i], bends[i])
                 lines = vec.push(lines, c.lines)
