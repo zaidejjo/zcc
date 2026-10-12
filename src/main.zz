@@ -21,7 +21,7 @@ import report
 import walker
 
 pub func VERSION() -> str {
-    "0.1.0"
+    "0.3.2"
 }
 
 func noop() {

@@ -4,7 +4,7 @@ name: release
 # Tags the current main tree; version stamping happens from the tag name.
 #
 # Two jobs, strict order:
-#   build — prebuilt zz toolchain (pinned in packaging/zz.version), zz test,
+#   build — prebuilt zz toolchain (latest upstream release), zz test,
 #           native release build, binary + source tarballs uploaded to the
 #           GitHub Release.
 #   aur   — Arch container: render the PKGBUILD from its template, generate
@@ -32,9 +32,11 @@ jobs:
 
       - name: Install prebuilt zz toolchain
         # Built once per zz release upstream — never compiled here.
+        # Always tracks the latest zz release.
         run: |
-          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
+          ZZVER=$(curl -fsSL https://api.github.com/repos/zaidejjo/zz/releases/latest | grep -o '"tag_name": *"v[^"]*"' | head -n 1 | sed 's/.*"v//;s/"//')
           test -n "$ZZVER"
+          echo "zz toolchain version: $ZZVER"
           curl -fsSL "https://github.com/zaidejjo/zz/releases/download/v$ZZVER/zz-$ZZVER-linux-x86_64.zip" \
             -o /tmp/zz.zip
           mkdir -p "$HOME/.local/zz-toolchain"
@@ -47,8 +49,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          sed -i "s/^    \"0\.1\.0\"$/    \"$VERSION\"/" zcc/src/main.zz
-          sed -i "s/^version = \"0\.1\.0\"$/version = \"$VERSION\"/" zcc/zz.toml
+          sed -i -E "s/^    \"[0-9][^\"]*\"$/    \"$VERSION\"/" zcc/src/main.zz
+          sed -i -E "s/^version = \"[^\"]*\"$/version = \"$VERSION\"/" zcc/zz.toml
           grep -n "\"$VERSION\"" zcc/src/main.zz zcc/zz.toml
 
       - name: Test + release build
@@ -57,23 +59,14 @@ jobs:
           zz install
           zz test
           zz build -p src/main.zz
-          ./src/bin/main --no-cache . --output json | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['total'])"
+          ./bin/zcc --no-cache . --output json | tee /tmp/zcc-smoke.json | grep -Eq '"total"[[:space:]]*:[[:space:]]*\{[^}]*"files"[[:space:]]*:[[:space:]]*[1-9]'
 
       - name: Package artifacts
         run: |
           cd zcc
           mkdir -p dist "zcc-$VERSION"
-          cp src/bin/main "zcc-$VERSION/zcc"
+          cp bin/zcc "zcc-$VERSION/zcc"
           cp README.md LICENSE config.example.json config.example-zz.json "zcc-$VERSION/"
-          # Bundle every non-system shared lib the AOT binary needs.
-          # The link step already stages libstd next to src/bin/main
-          # ($ORIGIN rpath) — copy it deterministically instead of
-          # ldd-sniffing (toolchain layouts vary; ldd misses them and
-          # ships an empty lib/, which is exactly the 0.3.0 failure).
-          # The AUR wrapper puts this dir on the loader path.
-          mkdir -p "zcc-$VERSION/lib"
-          cp src/bin/libstd-*.so "zcc-$VERSION/lib/" && echo "bundled: $(ls zcc-$VERSION/lib)"
-          cp packaging/zcc-wrapper.sh "zcc-$VERSION/zcc-wrapper.sh"
           tar -czf "dist/zcc-$VERSION-linux-x86_64.tar.gz" -C "zcc-$VERSION" .
           git archive --format=tar.gz --prefix="zcc-$VERSION/" -o "dist/zcc-$VERSION-src.tar.gz" HEAD
           # NOTE: git archive captures the *tag* tree (unstamped version);

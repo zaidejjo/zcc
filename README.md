@@ -21,6 +21,33 @@ JSON output, and warm runs under 0.1s. A tokei clone written in ZZ.
 
 ---
 
+## Install
+
+**ZZ (recommended):**
+```sh
+zz install --path zcc
+```
+
+**Arch Linux (AUR):**
+```sh
+yay -S zcc
+```
+
+**Prebuilt binary** (Linux x86_64) — from the
+[releases page](https://github.com/zaidejjo/zcc/releases):
+```sh
+tar -xzf zcc-0.3.2-linux-x86_64.tar.gz
+sudo install -Dm755 zcc /usr/bin/zcc
+```
+
+**From source** (needs the [ZZ toolchain](https://github.com/zaidejjo/zz)):
+```sh
+git clone https://github.com/zaidejjo/zcc.git && cd zcc
+cargo install --path ~/zz/crates/zz_cli   # the ZZ compiler
+zz build -p src/main.zz
+sudo cp bin/zcc /usr/bin/zcc
+```
+
 ```
 $ zcc
 ────────────────────────────────────────────────────────────────
@@ -48,28 +75,6 @@ Total                538    143995    115691     18385      9923
 - **Honest JSON** — machine-readable output for scripts and CI
 - **Generated-aware** — bundles, lockfiles and codegen don't pollute totals
 - **Cached** — mtime-keyed counts, instant repeat runs
-
-## Install
-
-**Arch Linux (AUR):**
-```sh
-yay -S zcc
-```
-
-**Prebuilt binary** (Linux x86_64) — from the
-[releases page](https://github.com/zaidejjo/zcc/releases):
-```sh
-tar -xzf zcc-0.1.0-linux-x86_64.tar.gz
-sudo install -Dm755 zcc /usr/bin/zcc
-```
-
-**From source** (needs the [ZZ toolchain](https://github.com/zaidejjo/zz)):
-```sh
-git clone https://github.com/zaidejjo/zcc.git && cd zcc
-cargo install --path ~/zz/crates/zz_cli   # the ZZ compiler
-zz build -p src/main.zz
-sudo cp src/bin/main /usr/bin/zcc
-```
 
 ## Usage
 
