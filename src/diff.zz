@@ -12,7 +12,6 @@ import std.vec
 import config
 import languages
 import report
-import table
 
 pub func run_diff(base: str) {
     if base == "" {
@@ -94,18 +93,14 @@ func print_diff_table(t: report.Table, added: [int], removed: [int], nfiles: int
     // Sort by added desc via index pick (reuse top_by_lines on added).
     idx := report.top_by_lines(added, len(added))
     th := report.default_theme()
-    bt := table.new(["Language", "Files", "Added", "Removed"])
-    bt = table.set_style(bt, th.style)
-    for c in 1..4 {
-        bt = table.set_align(bt, c, "right")
-    }
+    rows:[[str]] = []
     ta := 0
     tr := 0
     for k in idx {
-        bt = table.add_row(bt, [report.display_name(t.langs[k]), str(t.files[k]), "+" + str(added[k]), "-" + str(removed[k])])
+        rows = vec.push(rows, [report.display_name(t.langs[k]), str(t.files[k]), "+" + str(added[k]), "-" + str(removed[k])])
         ta = ta + added[k]
         tr = tr + removed[k]
     }
-    bt = table.set_footer(bt, ["Total", str(nfiles), "+" + str(ta), "-" + str(tr)])
-    println(table.render(bt))
+    foot := ["Total", str(nfiles), "+" + str(ta), "-" + str(tr)]
+    print(report.box_render(["Language", "Files", "Added", "Removed"], rows, foot, "", th.style, report.box_lang_aligns(4)))
 }

@@ -13,7 +13,6 @@ import std.vec
 import config
 import languages
 import report
-import table
 import walker
 
 pub struct BlameStat {
@@ -84,20 +83,16 @@ pub func run_blame(root: str) {
         return
     }
     th := report.default_theme()
-    bt := table.new(["Author", "Files", "Lines", "Share"])
-    bt = table.set_style(bt, th.style)
-    for c in 1..4 {
-        bt = table.set_align(bt, c, "right")
-    }
+    rows:[[str]] = []
     order := report.top_by_lines(nlines, len(nlines))
     for k in order {
         share := 0
         if total > 0 {
             share = nlines[k] * 100 / total
         }
-        bt = table.add_row(bt, [names[k], str(nfiles[k]), str(nlines[k]), str(share) + "%"])
+        rows = vec.push(rows, [names[k], str(nfiles[k]), str(nlines[k]), str(share) + "%"])
     }
-    println(table.render(bt))
+    print(report.box_render(["Author", "Files", "Lines", "Share"], rows, [], "", th.style, report.box_lang_aligns(4)))
     if skipped > 0 {
         println("{skipped} unblamable files skipped (untracked or binary)")
     }

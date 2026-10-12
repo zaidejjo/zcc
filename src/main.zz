@@ -47,8 +47,10 @@ func print_help() {
     println("    --only LANG         count only this language (e.g. Rust)")
     println("    --sort KEY          sort table by code|lines|files|comments|blanks (default code, desc; prefix - for asc)")
     println("    --reverse           ascending sort order")
-    println("    --style NAME        table style: rounded|sharp|heavy|double|markdown|minimal|ascii (default rounded)")
-    println("    --no-generated      hide Generated rows (totals recompute)")
+    println("    --style NAME        boxed table style (implies --table): rounded|sharp|heavy|double|markdown|minimal|ascii")
+    println("    --table               render bordered tables (default is the plain layout)")
+    println("    --generated           show Generated rows (hidden by default; totals recompute)")
+    println("    --no-generated      same as default (kept for compatibility)")
     println("    --force             with init: overwrite existing config")
     println("    --by-file           list top files by lines after the table")
     println("    --top N             files shown with --by-file (default 20)")
@@ -90,7 +92,8 @@ func main(cli_args: [str]) {
     sort := "code"
     rev := false
     style := "rounded"
-    no_generated := false
+    boxed := false
+    no_generated := true
     only := ""
     show_help := false
     show_ver := false
@@ -182,6 +185,7 @@ func main(cli_args: [str]) {
             parts := str.split(a, "=")
             if len(parts) > 1 {
                 style = parts[1]
+                boxed = true
             }
             continue
         }
@@ -191,7 +195,21 @@ func main(cli_args: [str]) {
         }
         if style_next {
             style = a
+            boxed = true
             style_next = false
+            continue
+        }
+        if a == "--table" {
+            boxed = true
+            continue
+        }
+        if style_next {
+            style = a
+            style_next = false
+            continue
+        }
+        if a == "--generated" {
+            no_generated = false
             continue
         }
         if a == "--no-generated" {
@@ -286,17 +304,17 @@ func main(cli_args: [str]) {
     }
     // single file mode
     if fs.exists(root) && fs.is_file(root) {
-        run_single(root, only, out_json)
+        run_single(root, only, out_json, boxed)
         return
     }
     if !fs.exists(root) {
         println("zcc: path not found: {root}")
         return
     }
-    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn, sort, rev, no_generated, style)
+    run_dir(root, only, out_json, include_hidden, use_ignore, use_cache, by_file, topn, sort, rev, no_generated, style, boxed)
 }
 
-func run_single(path: str, only: str, out_json: bool) {
+func run_single(path: str, only: str, out_json: bool, boxed: bool) {
     cfg := config.load_config()
     th := config.build_theme(cfg)
     table := config.lang_table_with(cfg)
@@ -311,27 +329,36 @@ func run_single(path: str, only: str, out_json: bool) {
         println("zcc: {path} is {lang}, filtered by --only {only}")
         return
     }
-    match fs.read_to_string(path) {
-        .ok(text) => {
-            if walker.has_nul(text) {
-                println("zcc: skipping binary {path}")
-                return
-            }
-            rules := languages.resolve_markers(table, lang, customs)
-            c := counter.count_content_with(text, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
-            t := report.new_table()
-            t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
-            if out_json {
-                println(report.to_json(t, report.new_table()))
-            } else {
-                report.print_table(t, th)
-            }
-        }
-        .err(e) => println("zcc: cannot read {path}: {e}")
+    rules := languages.resolve_markers(table, lang, customs)
+    // Fused single-file count: scan carries read + NUL-sniff + classify
+    // in one call, so no text is ever materialized. (Unreadable loses
+    // the errno detail the old read printed; dir/serial modes skip
+    // silently either way.)
+    r := counter.scan_file(path, lang, rules[0], rule_str(rules[1]), rule_str(rules[2]))
+    if r[0] < 0 {
+        println("zcc: cannot read {path}")
+        return
+    }
+    if r[4] == 1 {
+        println("zcc: skipping binary {path}")
+        return
+    }
+    c := counter.zero()
+    c.files = 1
+    c.lines = r[0]
+    c.code = r[1]
+    c.comments = r[2]
+    c.blanks = r[3]
+    t := report.new_table()
+    t = report.add_row(t, lang, 1, c.lines, c.code, c.comments, c.blanks)
+    if out_json {
+        println(report.to_json(t, report.new_table()))
+    } else {
+        report.print_table(t, th, boxed)
     }
 }
 
-func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int, sort: str, rev: bool, no_generated: bool, style: str) {
+func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ignore: bool, use_cache: bool, by_file: bool, topn: int, sort: str, rev: bool, no_generated: bool, style: str, boxed: bool) {
     pats := walker.load_patterns(root)
     // Worker budget shared by walk fan-out and count fan-out below.
     nworkers := sys.cpu_count()
@@ -386,9 +413,48 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
     memo_joined := []
     memo_b0 := []
     memo_b1 := []
+    // Extension memo: a handful of distinct extensions cover thousands
+    // of files. One small scan replaces the full ext-table scan per
+    // file (positive hits only: the detect_lang fallback is
+    // path-dependent and stays on the slow path).
+    memo_ext := []
+    memo_ext_lang := []
     for f in files {
         // Cheap string-only checks first: zero IO for unknown/filtered-out.
-        lang := languages.resolve_fast(em, f)
+        // Exact-name table first (Makefile, Dockerfile, ...): entries may
+        // carry dots, so this must precede any extension logic.
+        base := fs.basename(f)
+        lang := ""
+        for fi in 0..len(em.files) {
+            if em.files[fi] == base {
+                lang = em.filelangs[fi]
+                break
+            }
+        }
+        if lang == "" {
+            ext := str.to_lower(fs.extension(f))
+            for ei in 0..len(memo_ext) {
+                if memo_ext[ei] == ext {
+                    lang = memo_ext_lang[ei]
+                    break
+                }
+            }
+            if lang == "" {
+                for ei in 0..len(em.exts) {
+                    if em.exts[ei] == ext {
+                        lang = em.langs[ei]
+                        break
+                    }
+                }
+                if lang == "" {
+                    lang = languages.detect_lang(f)
+                }
+                if lang != "" {
+                    memo_ext = vec.push(memo_ext, ext)
+                    memo_ext_lang = vec.push(memo_ext_lang, lang)
+                }
+            }
+        }
         if lang == "" {
             continue
         }
@@ -397,11 +463,13 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         }
         // Generated files aggregate under "Generated", never into
         // language totals (filtering above still uses the real language).
-        show := lang
-        if walker.is_generated(f) {
-            show = "Generated"
+        // show_for_parts shares walker.is_generated's branches on the
+        // pre-extracted base/ext (no re-extraction per file).
+        show := walker.show_for_parts(lang, f, base, fs.extension(base))
+        sig := ["", ""]
+        if use_cache {
+            sig = cache.current_sig(f)
         }
-        sig := cache.current_sig(f)
         hit := false
         if use_cache && sig[0] != "" {
             e := cache.lookup_entry(cached, f)
@@ -436,8 +504,10 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         mpaths = vec.push(mpaths, f)
         mlangs = vec.push(mlangs, lang)
         mshows = vec.push(mshows, show)
-        msig0 = vec.push(msig0, sig[0])
-        msig1 = vec.push(msig1, sig[1])
+        if use_cache {
+            msig0 = vec.push(msig0, sig[0])
+            msig1 = vec.push(msig1, sig[1])
+        }
         mj := ""
         b0 := ""
         b1 := ""
@@ -478,6 +548,29 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
         }
     }
     misses = len(mpaths)
+    // Strided chunk order: contiguous ranges cluster giant files
+    // (minified bundles, corpora) into one chunk while sibling workers
+    // idle — measured 2x straggler (2101 vs 1045ms) on real trees.
+    // Dealing round-robin spreads giants evenly. Every array moves
+    // together, so the merge below stays positional and output is
+    // byte-identical. Serial path (< threshold) skips this entirely.
+    if misses >= parallel.par_threshold() {
+        nw := nworkers
+        if nw > misses {
+            nw = misses
+        }
+        if nw > 1 {
+            mpaths = stride_str(mpaths, misses, nw)
+            mlangs = stride_str(mlangs, misses, nw)
+            mshows = stride_str(mshows, misses, nw)
+            mjoined = stride_str(mjoined, misses, nw)
+            mbstart = stride_str(mbstart, misses, nw)
+            mbend = stride_str(mbend, misses, nw)
+            msig0 = stride_str(msig0, misses, nw)
+            msig1 = stride_str(msig1, misses, nw)
+            fpos = stride_int(fpos, misses, nw)
+        }
+    }
     // Phase 2: recount misses. Small trees stay serial (spawn + snapshot
     // cost more than they save); big cold trees fan out over green
     // threads, one chunk per worker, joined in order (deterministic).
@@ -618,9 +711,9 @@ func run_dir(root: str, only: str, out_json: bool, include_hidden: bool, use_ign
             println(report.to_json(t, emb))
         }
     } else {
-        report.print_table_full(t, emb, th, sort, rev)
+        report.print_table_full(t, emb, th, sort, rev, boxed)
         if by_file {
-            report.print_files_section(root, fpaths, flangs, flines, fcode, fcomments, fblanks, topn, th)
+            report.print_files_section(root, fpaths, flangs, flines, fcode, fcomments, fblanks, topn, th, boxed)
         }
     }
 }
@@ -632,4 +725,38 @@ pub func rule_str(xs: [str]) -> str {
         return xs[0]
     }
     ""
+}
+
+// Round-robin reorder for chunk balance (see Phase 2 prelude): element
+// k moves to dealing position so contiguous giants spread across
+// workers. Empty input (e.g. cache-gated sig arrays) passes through.
+
+pub func stride_str(xs: [str], n: int, nw: int) -> [str] {
+    if len(xs) == 0 {
+        return xs
+    }
+    out := []
+    for k in 0..nw {
+        j := k
+        while j < n {
+            out = vec.push(out, xs[j])
+            j = j + nw
+        }
+    }
+    out
+}
+
+pub func stride_int(xs: [int], n: int, nw: int) -> [int] {
+    if len(xs) == 0 {
+        return xs
+    }
+    out := []
+    for k in 0..nw {
+        j := k
+        while j < n {
+            out = vec.push(out, xs[j])
+            j = j + nw
+        }
+    }
+    out
 }
