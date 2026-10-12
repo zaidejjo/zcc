@@ -1069,8 +1069,9 @@ func print_emb_plain(t: Table, th: Theme) {
         }
     }
     tot := totals(t)
-    // "└" is 3 bytes / 1 column: over-pad by 2 so the row spans 16 columns.
-    c1 := pad_r(" └ (Total)", 18)
+    // "└" is 1 column: pad to the same 16 the data rows use (len()
+    // counts chars, so no byte over-padding).
+    c1 := pad_r(" └ (Total)", 16)
     c2 := pad_l(str(tot[0]), 8)
     c3 := pad_l(str(tot[1]), 10)
     c4 := pad_l(str(tot[2]), 10)

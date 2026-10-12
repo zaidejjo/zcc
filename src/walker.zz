@@ -407,118 +407,88 @@ pub func default_skip(name: str) -> bool {
 
 pub func is_generated(path: str) -> bool {
     b := fs.basename(path)
-    if b == "package-lock.json" || b == "yarn.lock" || b == "Gemfile.lock" {
-        return true
-    }
-    if b == "composer.lock" || b == "Cargo.lock" || b == "Podfile.lock" {
-        return true
-    }
-    if b == "poetry.lock" || b == "pnpm-lock.yaml" {
-        return true
-    }
-    ext := fs.extension(b)
-    if ext == "js" || ext == "css" {
-        if str.ends_with(b, ".min.js") || str.ends_with(b, ".min.css") {
-            return true
-        }
-        if str.ends_with(b, ".bundle.js") || str.ends_with(b, "-bundle.js") {
-            return true
-        }
-        return gen_dir(path)
-    }
-    if ext == "" {
-        return gen_dir(path)
-    }
-    if ext == "go" || ext == "cc" || ext == "h" || ext == "py" || ext == "dart" {
-        if str.ends_with(b, ".pb.go") || str.ends_with(b, ".pb.cc") {
-            return true
-        }
-        if str.ends_with(b, ".pb.h") || str.ends_with(b, ".pb.py") {
-            return true
-        }
-        if str.ends_with(b, "_pb2.py") || str.ends_with(b, ".g.dart") {
-            return true
-        }
-        if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
-            return true
-        }
-        return gen_dir(path)
-    }
-    if str.contains(b, "_generated.") || str.contains(b, ".generated.") {
-        return true
-    }
-    gen_dir(path)
+    show_for_parts("", path, b, fs.extension(b)) == "Generated"
 }
 
-// Content signals (called with the file body already in hand):
-// generator headers in the first lines, or minified single-huge-line
-// blobs. Allocation-free: line count via native count, headers via
-// bounded native scans over at most the first 5 lines, longest line
-// only measured for tiny (<=3 line) files. Case-insensitive header
-// match; minified gate is deliberately strict (longest > 2000 cols) so
-// test fixtures with long base64 lines never trip it.
+// Show-dispatch shared by run_dir phase-1 (which passes pre-extracted
+// base/ext so big trees avoid re-extraction per file) and is_generated
+// above. Pure function of its args: identical branches, single source,
+// so the fast path can never drift from the canonical check.
 
-pub func is_generated_content(text: str) -> bool {
-    if text == "" {
-        return false
+pub func show_for_parts(lang: str, path: str, base: str, extb: str) -> str {
+    gen := false
+    if base == "package-lock.json" || base == "yarn.lock" || base == "Gemfile.lock" {
+        gen = true
     }
-    // Line count without allocating the split (matches split_lines
-    // artifact-drop semantics: trailing newline adds no line).
-    nl := str.count(text, "\n")
-    n := nl
-    if !str.ends_with(text, "\n") {
-        n = n + 1
+    if !gen && (base == "composer.lock" || base == "Cargo.lock" || base == "Podfile.lock") {
+        gen = true
     }
-    // Minified gate only matters for tiny files: measure longest there.
-    if n <= 3 {
-        longest := 0
-        for raw in str.split(text, "\n") {
-            if len(raw) > longest {
-                longest = len(raw)
+    if !gen && (base == "poetry.lock" || base == "pnpm-lock.yaml") {
+        gen = true
+    }
+    if !gen {
+        if extb == "js" || extb == "css" {
+            if str.ends_with(base, ".min.js") || str.ends_with(base, ".min.css") {
+                gen = true
+            }
+            if !gen && (str.ends_with(base, ".bundle.js") || str.ends_with(base, "-bundle.js")) {
+                gen = true
+            }
+            if !gen {
+                gen = gen_dir(path)
+            }
+        } else if extb == "" {
+            gen = gen_dir(path)
+        } else if extb == "go" || extb == "cc" || extb == "h" || extb == "py" || extb == "dart" {
+            if str.ends_with(base, ".pb.go") || str.ends_with(base, ".pb.cc") {
+                gen = true
+            }
+            if !gen && (str.ends_with(base, ".pb.h") || str.ends_with(base, ".pb.py")) {
+                gen = true
+            }
+            if !gen && (str.ends_with(base, "_pb2.py") || str.ends_with(base, ".g.dart")) {
+                gen = true
+            }
+            if !gen && (str.contains(base, "_generated.") || str.contains(base, ".generated.")) {
+                gen = true
+            }
+            if !gen {
+                gen = gen_dir(path)
+            }
+        } else {
+            if str.contains(base, "_generated.") || str.contains(base, ".generated.") {
+                gen = true
+            }
+            if !gen {
+                gen = gen_dir(path)
             }
         }
-        if longest > 2000 {
-            return true
-        } // Tiny file: check every line below (head covers all of them).
-        
     }
-    // Header check over at most the first 5 lines: walk newlines to
-    // find the head end, then ONE lowercase + ONE marker chain over the
-    // slice (was 5 lowers + ~30 contains). Lowercasing is per-char, so
-    // one head pass matches exactly what per-line passes matched.
-    pos := 0
-    checked := 0
-    while checked < 5 {
-        eol := str.find_in(text, "\n", pos, len(text))
-        if eol < 0 {
-            pos = len(text)
-            break
-        }
-        pos = eol + 1
-        checked = checked + 1
-        if pos >= len(text) {
-            break
-        }
+    if gen {
+        return "Generated"
     }
-    low := str.to_lower(text[0:pos])
-    if str.contains(low, "generated by") || str.contains(low, "auto-generated") || str.contains(low, "do not edit") || str.contains(low, "do not modify") || str.contains(low, "@generated") || str.contains(low, "generated code") {
-        return true
-    }
-    false
+    lang
 }
+
+// Content signals now live in the fused `counter.is_generated_file`
+// native (single path read, no text crossing); the original ZZ loop is
+// preserved in git history. Threshold contract (also pinned by the
+// native's fixture): minified gate fires only on tiny (<=3 line) files
+// with longest line over 2000 chars; headers match case-insensitively
+// in at most the first 5 lines.
 
 // Inside a generated/ tree everything counts generated (scanning
 // generated/ itself marks the whole subtree, which is honest).
 
-func gen_dir(path: str) -> bool {
+pub func gen_dir(path: str) -> bool {
     str.contains(path, "/generated/") || str.starts_with(path, "generated/")
 }
 
 pub func rel_path(root: str, full: str) -> str {
-    # NOTE: single-char splits/joins only — AOT str.split with a
-    # multi-char separator drops the remainder (toolchain bug), so a
-    # previous `split(full, root + "/")` version returned "" natively
-    # and silently disabled every rel-based skip rule.
+    // NOTE: single-char splits/joins only — AOT str.split with a
+    // multi-char separator drops the remainder (toolchain bug), so a
+    // previous `split(full, root + "/")` version returned "" natively
+    // and silently disabled every rel-based skip rule.
     prefix := root + "/"
     if str.starts_with(full, prefix) {
         rsegs := str.split(full, "/")
