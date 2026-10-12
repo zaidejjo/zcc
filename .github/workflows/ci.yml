@@ -20,11 +20,11 @@ jobs:
 
       - name: Install prebuilt zz toolchain
         # Built once per zz release upstream — never compiled here.
-        # Pinned in zcc/packaging/zz.version; bump that file to adopt a
-        # newer compiler.
+        # Always tracks the latest zz release.
         run: |
-          ZZVER=$(tr -d '[:space:]' < zcc/packaging/zz.version)
+          ZZVER=$(curl -fsSL https://api.github.com/repos/zaidejjo/zz/releases/latest | grep -o '"tag_name": *"v[^"]*"' | head -n 1 | sed 's/.*"v//;s/"//')
           test -n "$ZZVER"
+          echo "zz toolchain version: $ZZVER"
           curl -fsSL "https://github.com/zaidejjo/zz/releases/download/v$ZZVER/zz-$ZZVER-linux-x86_64.zip" \
             -o /tmp/zz.zip
           mkdir -p "$HOME/.local/zz-toolchain"
@@ -47,6 +47,6 @@ jobs:
       - name: Smoke test
         working-directory: zcc
         run: |
-          ./src/bin/main --no-cache . --output json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['total']['files'] > 0; print(d['total'])"
-          ./src/bin/main --version
-          ./src/bin/main init --help 2>/dev/null || ./src/bin/main --help | head -n 5
+          ./bin/zcc --no-cache . --output json | tee /tmp/zcc-smoke.json | grep -Eq '"total"[[:space:]]*:[[:space:]]*\{[^}]*"files"[[:space:]]*:[[:space:]]*[1-9]'
+          ./bin/zcc --version
+          ./bin/zcc init --help 2>/dev/null || ./bin/zcc --help | head -n 5
